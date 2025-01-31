@@ -1,7 +1,10 @@
 use std::borrow;
+use std::path::Path;
+use std::str::from_utf8;
 use std::{collections::HashMap, usize};
 
 use cpp_demangle::DemangleOptions;
+use rustc_demangle::demangle;
 use object::read::{ElfFile, Object, MachOFile};
 use object::SymbolKind;
 use object::ObjectSection;
@@ -25,7 +28,6 @@ fn main_macos(data: Vec<u8>) {
         gimli::RunTimeEndian::Big
     };
 
-    let pattern = std::env::args().nth(2).unwrap();
 
     let mut debug_file = std::fs::File::open(debug.unwrap()).unwrap();
 
@@ -36,13 +38,72 @@ fn main_macos(data: Vec<u8>) {
 
     let ao = addr2line::object::File::parse(&debug_data[..]).unwrap();
     let context = addr2line::Context::new(&ao).unwrap();
+    for s in object_file.sections() {
+        let mut addr = s.address();
+        let mut time = 0;
+        for _ in 0..s.data().len() {
+            if time & 0x3 != 0 {
+                time += 1;
+                addr += 1;
+                continue;
+            }
+            let mut frames = context.find_frames(addr).unwrap();
+            let mut funcs = Vec::new();
+            let mut last_location = None;
+            while let Some(f) = frames.next().unwrap() {
+                let fname = f.function.unwrap().name;
+                let demang_sym = cpp_demangle::Symbol::new(&*fname);
+                let name = if let Ok(sym) = demang_sym {
+                    sym.demangle(&DemangleOptions::default().no_params().no_return_type()).unwrap()
+                } else {
+                    let demang_sym = rustc_demangle::try_demangle((from_utf8(&*fname).unwrap()));
+                    if let Ok(sym) = demang_sym {
+                        sym.to_string()
+                    } else {
+                        std::str::from_utf8(&fname).unwrap().to_owned()
+                    }
+                };
+                last_location = f.location;
+                //.map(|x| x.demangle(&DemangleOptions::default()));
+                funcs.push(name);
+            }
+            let location = context.find_location(addr).unwrap();
+            println!("swapper     0/0     [000] {}:          1 cycles:", time);
+            for f in &funcs {
+                let module = "bar";
+                let ip = addr;
+                println!("\t{:x} {} ({})", ip, f, module);
+            }
+            if let Some(location) = last_location {
+                let path = Path::new(location.file.unwrap());
+                let mut accum = String::new();
+                let mut paths = Vec::new();
+                for p in path.components() {
+                    accum = format!("{}/{}", accum, p.as_os_str().to_str().unwrap());
+                    paths.push(accum.clone());
+                }
+                for p in paths.iter().rev() {
+                    let module = "bar";
+                    let ip = addr;
+                    println!("\t{:x} {} ({})", ip, p, module);
+                }
+
+            }
+
+            println!("");
+            time += 1;
+            addr += 1;
+        }
+    }
+
+    /* 
     let perf = true;
     for s in debug_object.debug_session().unwrap().functions() {
         let f = s.unwrap();
         if f.name.as_str().contains(&pattern) {
             dbg!(f.name, f.address, f.size);
             for s in object_file.sections() {
-                let addr = f.address +     debug_object.load_address();                ;
+                let addr = f.address + debug_object.load_address();                ;
                 if addr > s.address() && addr <= s.address() + s.size() {
                     assert!(f.address + f.size <= s.address() + s.size());
                     let func = &s.data()[dbg!((addr - s.address()) as usize..(addr - s.address() + f.size) as usize)];
@@ -81,8 +142,8 @@ fn main_macos(data: Vec<u8>) {
                 } 
             }
         }
-
-    }
+        
+    }*/
     /*
     let debug_object = MachOFile::parse(&debug_data).unwrap();
     let load_section = |id: gimli::SectionId| -> Result<borrow::Cow<[u8]>, gimli::Error> {
@@ -124,7 +185,7 @@ fn main_macos(data: Vec<u8>) {
         }
     }*/
 
-
+/* *
 
     for s in object_file.dynamic_symbols().chain(object_file.symbols())
      {
@@ -139,7 +200,7 @@ fn main_macos(data: Vec<u8>) {
             }
 
         }
-    }
+    }*/
 
 }
 fn main_arm(data: Vec<u8>) {
