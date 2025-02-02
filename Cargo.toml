@@ -8,12 +8,10 @@ edition = "2018"
 
 [dependencies]
 object = "0.16.0"
-cpp_demangle = "0.3.2"
 addr2line = "0.15.1"
 locate-dwarf = "0.1.0"
 gimli = "0.26.1"
 symbolic-debuginfo = "8.5.0"
-rustc-demangle = "0.1.24"
 wholesym = "0.7.0"
 futures = "0.3.31"
 fxprof-processed-profile = "0.8.0"

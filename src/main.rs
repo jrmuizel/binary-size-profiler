@@ -1,6 +1,5 @@
 use std::path::Path;
 
-use cpp_demangle::DemangleOptions;
 use object::read::Object;
 use object::ObjectSection;
 use object::File;
@@ -14,6 +13,7 @@ fn main() {
     use std::io::Read;
 
     let path = &std::env::args().nth(1).unwrap();
+    let file_name = Path::new(path).file_name().unwrap().to_str().unwrap();
 
     let mut data = Vec::new();
     let mut file = std::fs::File::open(path).unwrap();
@@ -26,7 +26,7 @@ fn main() {
         .load_symbol_map_for_binary_at_path(Path::new(path), None)).unwrap();
 
     let mut profile = Profile::new("size-profiler", ReferenceTimestamp::from_millis_since_unix_epoch(0.), SamplingInterval::from_hz(1000.));
-    let process = profile.add_process("foo", 0, Timestamp::from_millis_since_reference(0.));
+    let process = profile.add_process(file_name, 0, Timestamp::from_millis_since_reference(0.));
     let thread = profile.add_thread(process, 0, Timestamp::from_millis_since_reference(0.), true);
     profile.set_thread_samples_weight_type(thread, WeightType::Bytes);
     let category = CategoryHandle::OTHER.into();
@@ -53,23 +53,9 @@ fn main() {
                 let mut frames = frames.iter();
 
                 while let Some(f) = frames.next() {
-                    let fname = f.function.as_ref().map(|x| x.as_str()).unwrap_or("unnamed");
-                    let demang_sym = cpp_demangle::Symbol::new(&*fname);
-                    let name = if let Ok(sym) = demang_sym {
-                        sym.demangle(&DemangleOptions::default().no_params().no_return_type()).unwrap()
-                    } else {
-                        let demang_sym = rustc_demangle::try_demangle(&fname);
-                        if let Ok(sym) = demang_sym {
-                            sym.to_string()
-                        } else {
-                            fname.to_owned()
-                        }
-                    };
+                    let name = f.function.as_ref().map(|x| x.as_str()).unwrap_or("unnamed");
                     last_location = f.file_path.clone();
-                    //.map(|x| x.demangle(&DemangleOptions::default()));
                     sample_frames.push(FrameInfo { frame: Frame::Label(profile.intern_string(&name)), flags: FrameFlags::empty(), category_pair: category});
-
-                    //funcs.push(name);
                 }
 
                 if let Some(location) = last_location {
@@ -84,10 +70,7 @@ fn main() {
                     }
                     
                     for p in paths.iter().rev() {
-
                         sample_frames.push(FrameInfo { frame: Frame::Label(profile.intern_string(&p)), flags: FrameFlags::empty(), category_pair: category});
-
-                        //println!("\t{:x} {} ({})", ip, p, module);
                     }
 
                 }
