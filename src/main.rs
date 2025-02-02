@@ -9,6 +9,7 @@ use rustc_demangle::demangle;
 use object::read::{ElfFile, Object, MachOFile, PeFile};
 use object::SymbolKind;
 use object::ObjectSection;
+use object::File;
 use capstone::{arch::{ArchOperand, arm::{ArmOperand, ArmOperandType}}, prelude::*};
 use wholesym::SymbolManager;
 use wholesym::SymbolManagerConfig;
@@ -30,7 +31,7 @@ fn main_win(path: &str) {
 
     use std::io::Read;
     file.read_to_end(&mut data).unwrap();
-    let object_file = PeFile::parse(&data).unwrap();
+    let object_file = File::parse(&data).unwrap();
 
     let symbol_manager = SymbolManager::with_config(SymbolManagerConfig::default().verbose(true));
     let symbol_map = block_on(symbol_manager
