@@ -1,20 +1,13 @@
-use std::borrow;
 use std::path::Path;
-use std::str::from_utf8;
-use std::{collections::HashMap, usize};
 
-use addr2line::FunctionName;
 use cpp_demangle::DemangleOptions;
-use rustc_demangle::demangle;
-use object::read::{ElfFile, Object, MachOFile, PeFile};
-use object::SymbolKind;
+use object::read::Object;
 use object::ObjectSection;
 use object::File;
-use capstone::{arch::{ArchOperand, arm::{ArmOperand, ArmOperandType}}, prelude::*};
 use wholesym::SymbolManager;
 use wholesym::SymbolManagerConfig;
 use futures::executor::block_on;
-use fxprof_processed_profile::{CategoryHandle, CategoryPairHandle, CpuDelta, Frame, FrameFlags, FrameInfo, Profile, ReferenceTimestamp, SamplingInterval, Timestamp, WeightType};
+use fxprof_processed_profile::{CategoryHandle, CpuDelta, Frame, FrameFlags, FrameInfo, Profile, ReferenceTimestamp, SamplingInterval, Timestamp, WeightType};
 
 fn main() {
 
@@ -48,12 +41,8 @@ fn main() {
             if addr & 0xffff == 0 {
                 eprintln!("{:x}/{:x} = {:.2?}%", addr, s.data().len(), 100. * addr as f64 / s.data().len() as f64);
             }
-            // if time & 0x3 != 0 {
-            //     time += 1;
-            //     addr += 1;
-            //     continue;
-            // }
-            let mut addr_info = block_on(symbol_map.lookup(wholesym::LookupAddress::Relative(addr as u32)));
+
+            let addr_info = block_on(symbol_map.lookup(wholesym::LookupAddress::Relative(addr as u32)));
             //dbg!(&addr_info);
             let Some(addr_info) = addr_info  else { addr +=1; time +=1; continue };
             let mut last_location = None;
@@ -62,9 +51,6 @@ fn main() {
  
             if let Some (frames) = &addr_info.frames {
                 let mut frames = frames.iter();
-
-                //let mut funcs = Vec::new();
-
 
                 while let Some(f) = frames.next() {
                     let fname = f.function.as_ref().map(|x| x.as_str()).unwrap_or("unnamed");
@@ -86,12 +72,6 @@ fn main() {
                     //funcs.push(name);
                 }
 
-                //println!("swapper     0/0     [000] {}:          1 cycles:", time);
-                /*for f in &funcs {
-                    let module = "bar";
-                    let ip = addr;
-                    println!("\t{:x} {} ({})", ip, f, module);
-                }*/
                 if let Some(location) = last_location {
                     let path = location.raw_path();
                     //eprintln!("{:?}", path);
@@ -104,8 +84,7 @@ fn main() {
                     }
                     
                     for p in paths.iter().rev() {
-                        let module = "bar";
-                        let ip = addr;
+
                         sample_frames.push(FrameInfo { frame: Frame::Label(profile.intern_string(&p)), flags: FrameFlags::empty(), category_pair: category});
 
                         //println!("\t{:x} {} ({})", ip, p, module);
