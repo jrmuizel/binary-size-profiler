@@ -102,7 +102,7 @@ fn main_win(path: &str) {
                     let path = path.trim_start_matches("C:\\b\\s\\w\\ir\\cache\\builder\\");
                     let mut accum = String::new();
                     let mut paths = Vec::new();
-                    for p in path.split("/") {
+                    for p in path.split(|c| c == '/' || c == '\\') {
                         accum = format!("{}/{}", accum, p);
                         paths.push(accum.clone());
                     }
