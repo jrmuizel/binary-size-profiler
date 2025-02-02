@@ -114,7 +114,7 @@ fn main() {
         profile.add_sample(thread, Timestamp::from_millis_since_reference(time as f64), last_stack, CpuDelta::ZERO, weight);
 
     }
-    let mut output_file = std::fs::File::create("output.json").unwrap();
+    let output_file = std::fs::File::create("output.json").unwrap();
     let writer = std::io::BufWriter::new(output_file);
     serde_json::to_writer(writer, &profile).unwrap();
 }
