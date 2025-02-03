@@ -7,15 +7,14 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-object = "0.16.0"
-addr2line = "0.15.1"
-locate-dwarf = "0.1.0"
-gimli = "0.26.1"
-symbolic-debuginfo = "8.5.0"
-wholesym = "0.7.0"
+object = "0.36"
+wholesym = "0.8.0"
+uuid = "1.12"
 futures = "0.3.31"
 fxprof-processed-profile = "0.8.0"
 serde_json = "1.0.138"
+tokio = { version = "1.38", features = ["rt", "rt-multi-thread", "macros"] }
+mimalloc = { version = "*", features = ["override"] }
 
 [profile.release]
 debug = true
