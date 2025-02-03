@@ -1,0 +1,7 @@
+target
+profile.json
+profile.json.gz
+.DS_Store
+output.json
+breakpad-symbol-cache
+breakpad-symindex-cache
