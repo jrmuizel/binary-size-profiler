@@ -20,6 +20,8 @@ use wholesym::SymbolManagerConfig;
 #[allow(unused)]
 use mimalloc::MiMalloc;
 
+use indicatif::{ProgressBar, ProgressStyle};
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read;
@@ -87,22 +89,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut addr = section_start_rel;
         let mut time = 0;
         eprintln!("Processing section: {}", s.name().unwrap());
+
+        let pb = ProgressBar::new(section_size);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})").unwrap()
+            .progress_chars("#>-"));
+
         let mut last_stack = None;
         let mut weight = 1;
         for _ in 0..section_size {
             if addr & 0xffff == 0 {
-                eprintln!(
-                    "{:x}/{:x} = {:.2?}%",
-                    addr - section_start_rel,
-                    section_size,
-                    100. * (addr - section_start_rel) as f64 / section_size as f64
-                );
+                pb.set_position((addr - section_start_rel) as u64);
             }
 
             let addr_info = symbol_map
                 .lookup(wholesym::LookupAddress::Relative(addr as u32))
                 .await;
-            //dbg!(&addr_info);
             let Some(addr_info) = addr_info else {
                 addr += 1;
                 time += 1;
@@ -122,7 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 if let Some(path) = get_outer_function_location(&frames) {
-                    //eprintln!("{:?}", path);
                     let path = path.trim_start_matches("C:\\b\\s\\w\\ir\\cache\\builder\\");
                     let mut accum_path = String::new();
                     for p in path.split(['/', '\\']) {
@@ -153,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     category_pair: category,
                 });
             }
-            //dbg!(&sample_frames);
+
             let stack = profile.intern_stack_frames(thread, sample_frames.into_iter());
             if stack != last_stack {
                 profile.add_sample(
@@ -169,7 +170,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             last_stack = stack;
 
-            //println!("");
             time += 1;
             addr += 1;
         }
@@ -180,6 +180,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             CpuDelta::ZERO,
             weight,
         );
+
+        pb.finish_with_message("Section processed");
     }
     let output_file = std::fs::File::create("output.json").unwrap();
     let writer = std::io::BufWriter::new(output_file);
