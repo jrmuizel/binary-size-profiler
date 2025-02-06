@@ -5,6 +5,8 @@ use fxprof_processed_profile::{
     CategoryHandle, CpuDelta, Frame, FrameFlags, FrameInfo, LibraryInfo, Profile,
     ReferenceTimestamp, SamplingInterval, StackHandle, Timestamp, WeightType,
 };
+use indicatif::{ProgressBar, ProgressStyle};
+use mimalloc::MiMalloc;
 use object::read::macho::FatArch;
 use object::read::macho::MachOFatFile32;
 use object::read::Object;
@@ -18,10 +20,8 @@ use wholesym::MultiArchDisambiguator;
 use wholesym::SymbolManager;
 use wholesym::SymbolManagerConfig;
 
-#[allow(unused)]
-use mimalloc::MiMalloc;
-
-use indicatif::{ProgressBar, ProgressStyle};
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
