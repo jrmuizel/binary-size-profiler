@@ -88,6 +88,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "597bb81c80a54b6a4381b23faba8d7774b144c94cbd1d6fe3f1329bd776554ab"
 
 [[package]]
+name = "binary-size-profiler"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "fxprof-processed-profile",
+ "indicatif",
+ "mimalloc",
+ "object",
+ "serde_json",
+ "tokio",
+ "uuid",
+ "wholesym",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1477,21 +1492,6 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "size-profiler"
-version = "0.1.0"
-dependencies = [
- "futures",
- "fxprof-processed-profile",
- "indicatif",
- "mimalloc",
- "object",
- "serde_json",
- "tokio",
- "uuid",
- "wholesym",
-]
 
 [[package]]
 name = "slab"

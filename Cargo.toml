@@ -1,5 +1,5 @@
 [package]
-name = "size-profiler"
+name = "binary-size-profiler"
 version = "0.1.0"
 authors = ["Jeff Muizelaar <jrmuizel@gmail.com>"]
 edition = "2018"
