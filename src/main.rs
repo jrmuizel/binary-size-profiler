@@ -191,6 +191,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .await;
     }
+
+    // Add a final sample with zero weight, so that the profiler's automatic time range detection
+    // includes all the file bytes.
+    profile.add_sample(
+        thread,
+        Timestamp::from_millis_since_reference(data.len() as f64),
+        Some(root_stack),
+        CpuDelta::ZERO,
+        0,
+    );
+
     let output_file = std::fs::File::create("output.json").unwrap();
     let writer = std::io::BufWriter::new(output_file);
     serde_json::to_writer(writer, &profile).unwrap();
