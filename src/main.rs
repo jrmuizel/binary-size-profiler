@@ -65,49 +65,132 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let symbol_manager = SymbolManager::with_config(config);
 
     // If we got a fat binary, pick the first member.
-    let data = if dbg!(file_kind) == FileKind::MachOFat32 {
-        let member = MachOFatFile32::parse(&data[..])
-            .unwrap()
-            .arches()
-            .first()
-            .unwrap();
-        let offset = member.offset();
-        let size = member.size();
-        &data[offset as usize..][..size as usize]
-    } else {
-        &data[..]
-    };
+    if file_kind == FileKind::MachOFat32 {
+        let mut previous_member_end_file_offset = 0;
+        let mut previous_member_name = None;
+        for member in MachOFatFile32::parse(&data[..]).unwrap().arches() {
+            let member_name =
+                match macho_arch_name_for_cpu_type(member.cputype(), member.cpusubtype()) {
+                    Some(name) => name.to_owned(),
+                    None => format!(
+                        "Fat32 archive member with cputype {} and cpusubtype {}",
+                        member.cputype(),
+                        member.cpusubtype()
+                    ),
+                };
 
-    let object_file = File::parse(data).unwrap();
+            let member_start_file_offset = member.offset() as u64;
+            let member_size = member.size() as u64;
 
-    let disambiguator = if let Ok(Some(uuid)) = object_file.mach_uuid() {
-        let uuid = Uuid::from_bytes(uuid);
-        Some(MultiArchDisambiguator::DebugId(DebugId::from_uuid(uuid)))
-    } else {
-        None
-    };
+            if member_start_file_offset < previous_member_end_file_offset {
+                panic!("Overlapping fat archive members: Member with arch {member_name} starts at file offset {member_start_file_offset:#x} which is before the end file offset {previous_member_end_file_offset:#x} of member with arch {}", previous_member_name.unwrap());
+            }
 
-    let lib_info =
-        SymbolManager::library_info_for_binary_at_path(Path::new(path), disambiguator.clone())
+            if member_start_file_offset > previous_member_end_file_offset {
+                let padding_bytes_before_member =
+                    member_start_file_offset - previous_member_end_file_offset;
+                profile.add_sample(
+                    thread,
+                    Timestamp::from_millis_since_reference(previous_member_end_file_offset as f64),
+                    Some(root_stack),
+                    CpuDelta::ZERO,
+                    i32::try_from(padding_bytes_before_member).unwrap(),
+                );
+            }
+
+            let member_s = profile.intern_string(&member_name);
+            let member_frame = profile.intern_frame(
+                thread,
+                FrameInfo {
+                    frame: Frame::Label(member_s),
+                    category_pair: category,
+                    flags: FrameFlags::empty(),
+                },
+            );
+            let member_stack = profile.intern_stack(thread, Some(root_stack), member_frame);
+
+            let data = &data[member_start_file_offset as usize..][..member_size as usize];
+            let object_file = File::parse(data).unwrap();
+
+            let disambiguator = if let Ok(Some(uuid)) = object_file.mach_uuid() {
+                let uuid = Uuid::from_bytes(uuid);
+                Some(MultiArchDisambiguator::DebugId(DebugId::from_uuid(uuid)))
+            } else {
+                None
+            };
+
+            let lib_info = SymbolManager::library_info_for_binary_at_path(
+                Path::new(path),
+                disambiguator.clone(),
+            )
             .await
             .unwrap();
 
-    let symbol_map = symbol_manager
-        .load_symbol_map_for_binary_at_path(Path::new(path), disambiguator)
-        .await
-        .unwrap();
+            let symbol_map = symbol_manager
+                .load_symbol_map_for_binary_at_path(Path::new(path), disambiguator)
+                .await
+                .unwrap();
 
-    process_binary(
-        &mut profile,
-        thread,
-        root_stack,
-        &object_file,
-        lib_info,
-        symbol_map,
-        category,
-        data.len() as u64,
-    )
-    .await;
+            process_binary(
+                &mut profile,
+                thread,
+                member_stack,
+                &object_file,
+                lib_info,
+                symbol_map,
+                category,
+                member_start_file_offset,
+                member_size,
+            )
+            .await;
+
+            previous_member_end_file_offset = member_start_file_offset + member_size;
+            previous_member_name = Some(member_name);
+        }
+
+        let file_end_file_offset = data.len() as u64;
+        if file_end_file_offset < previous_member_end_file_offset {
+            panic!("Truncated fat archive member: File size is {file_end_file_offset:#x} which is less than the end file offset {previous_member_end_file_offset:#x} of member {}", previous_member_name.unwrap());
+        }
+
+        if file_end_file_offset > previous_member_end_file_offset {
+            let padding_bytes_after_section =
+                file_end_file_offset - previous_member_end_file_offset;
+            profile.add_sample(
+                thread,
+                Timestamp::from_millis_since_reference(previous_member_end_file_offset as f64),
+                Some(root_stack),
+                CpuDelta::ZERO,
+                i32::try_from(padding_bytes_after_section).unwrap(),
+            );
+        }
+    } else {
+        let data = &data[..];
+
+        let object_file = File::parse(data).unwrap();
+
+        let lib_info = SymbolManager::library_info_for_binary_at_path(Path::new(path), None)
+            .await
+            .unwrap();
+
+        let symbol_map = symbol_manager
+            .load_symbol_map_for_binary_at_path(Path::new(path), None)
+            .await
+            .unwrap();
+
+        process_binary(
+            &mut profile,
+            thread,
+            root_stack,
+            &object_file,
+            lib_info,
+            symbol_map,
+            category,
+            0,
+            data.len() as u64,
+        )
+        .await;
+    }
     let output_file = std::fs::File::create("output.json").unwrap();
     let writer = std::io::BufWriter::new(output_file);
     serde_json::to_writer(writer, &profile).unwrap();
@@ -134,6 +217,7 @@ async fn process_binary(
     lib_info: wholesym::LibraryInfo,
     symbol_map: wholesym::SymbolMap,
     category: CategoryPairHandle,
+    timestamp_offset: u64,
     binary_file_size: u64,
 ) {
     let lib = LibraryInfo {
@@ -190,7 +274,9 @@ async fn process_binary(
                 section_start_file_offset - previous_section_end_file_offset;
             profile.add_sample(
                 thread,
-                Timestamp::from_millis_since_reference(previous_section_end_file_offset as f64),
+                Timestamp::from_millis_since_reference(
+                    (timestamp_offset + previous_section_end_file_offset) as f64,
+                ),
                 Some(root_stack),
                 CpuDelta::ZERO,
                 i32::try_from(padding_bytes_before_section).unwrap(),
@@ -205,6 +291,7 @@ async fn process_binary(
             &symbol_map,
             base_addr,
             category,
+            timestamp_offset,
         )
         .await;
 
@@ -214,14 +301,16 @@ async fn process_binary(
 
     let file_end_file_offset = binary_file_size;
     if file_end_file_offset < previous_section_end_file_offset {
-        panic!("Truncated section: File size is {binary_file_size:#x} which is less than the end file offset {previous_section_end_file_offset:#x} of section {}", previous_section_name.unwrap());
+        panic!("Truncated section: File size is {file_end_file_offset:#x} which is less than the end file offset {previous_section_end_file_offset:#x} of section {}", previous_section_name.unwrap());
     }
 
     if file_end_file_offset > previous_section_end_file_offset {
         let padding_bytes_after_section = file_end_file_offset - previous_section_end_file_offset;
         profile.add_sample(
             thread,
-            Timestamp::from_millis_since_reference(previous_section_end_file_offset as f64),
+            Timestamp::from_millis_since_reference(
+                (timestamp_offset + previous_section_end_file_offset) as f64,
+            ),
             Some(root_stack),
             CpuDelta::ZERO,
             i32::try_from(padding_bytes_after_section).unwrap(),
@@ -229,6 +318,7 @@ async fn process_binary(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_section(
     profile: &mut Profile,
     thread: ThreadHandle,
@@ -237,6 +327,7 @@ async fn process_section(
     symbol_map: &wholesym::SymbolMap,
     base_addr: u64,
     category: CategoryPairHandle,
+    timestamp_offset: u64,
 ) {
     let section_s = profile.intern_string(&section.name);
     let section_frame = profile.intern_frame(
@@ -263,7 +354,7 @@ async fn process_section(
             profile.intern_stack(thread, Some(section_stack), section_kind_frame);
         profile.add_sample(
             thread,
-            Timestamp::from_millis_since_reference(section.file_offset as f64),
+            Timestamp::from_millis_since_reference((timestamp_offset + section.file_offset) as f64),
             Some(section_kind_stack),
             CpuDelta::ZERO,
             i32::try_from(section.size).unwrap(),
@@ -402,7 +493,9 @@ async fn process_section(
             if stack != last_stack {
                 profile.add_sample(
                     thread,
-                    Timestamp::from_millis_since_reference(next_sample_file_offset as f64),
+                    Timestamp::from_millis_since_reference(
+                        (timestamp_offset + next_sample_file_offset) as f64,
+                    ),
                     Some(last_stack),
                     CpuDelta::ZERO,
                     i32::try_from(last_stack_bytes).unwrap(),
@@ -416,7 +509,7 @@ async fn process_section(
     }
     profile.add_sample(
         thread,
-        Timestamp::from_millis_since_reference(next_sample_file_offset as f64),
+        Timestamp::from_millis_since_reference((timestamp_offset + next_sample_file_offset) as f64),
         last_stack,
         CpuDelta::ZERO,
         i32::try_from(last_stack_bytes).unwrap(),
@@ -431,4 +524,35 @@ async fn process_section(
     );
 
     pb.finish_with_message("Section processed");
+}
+
+/// Converts a cpu type/subtype pair into the architecture name.
+///
+/// For example, this converts `CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E` to `Some("arm64e")`.
+fn macho_arch_name_for_cpu_type(cputype: u32, cpusubtype: u32) -> Option<&'static str> {
+    use object::macho::*;
+    let s = match (cputype, cpusubtype) {
+        (CPU_TYPE_X86, _) => "i386",
+        (CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_H) => "x86_64h",
+        (CPU_TYPE_X86_64, _) => "x86_64",
+        (CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E) => "arm64e",
+        (CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64_V8) => "arm64v8",
+        (CPU_TYPE_ARM64, _) => "arm64",
+        (CPU_TYPE_ARM64_32, CPU_SUBTYPE_ARM64_32_V8) => "arm64_32v8",
+        (CPU_TYPE_ARM64_32, _) => "arm64_32",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V5TEJ) => "armv5",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V6) => "armv6",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V6M) => "armv6m",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7) => "armv7",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7F) => "armv7f",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7S) => "armv7s",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7K) => "armv7k",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7M) => "armv7m",
+        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7EM) => "armv7em",
+        (CPU_TYPE_ARM, _) => "arm",
+        (CPU_TYPE_POWERPC, CPU_SUBTYPE_POWERPC_ALL) => "ppc",
+        (CPU_TYPE_POWERPC64, CPU_SUBTYPE_POWERPC_ALL) => "ppc64",
+        _ => return None,
+    };
+    Some(s)
 }
