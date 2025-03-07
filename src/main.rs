@@ -69,18 +69,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut previous_member_end_file_offset = 0;
         let mut previous_member_name = None;
         for member in MachOFatFile32::parse(&data[..]).unwrap().arches() {
-            let member_name =
-                match macho_arch_name_for_cpu_type(member.cputype(), member.cpusubtype()) {
-                    Some(name) => name.to_owned(),
-                    None => format!(
-                        "Fat32 archive member with cputype {} and cpusubtype {}",
-                        member.cputype(),
-                        member.cpusubtype()
-                    ),
-                };
-
             let member_start_file_offset = member.offset() as u64;
             let member_size = member.size() as u64;
+
+            let data = &data[member_start_file_offset as usize..][..member_size as usize];
+            let object_file = File::parse(data).unwrap();
+
+            let disambiguator = if let Ok(Some(uuid)) = object_file.mach_uuid() {
+                let uuid = Uuid::from_bytes(uuid);
+                Some(MultiArchDisambiguator::DebugId(DebugId::from_uuid(uuid)))
+            } else {
+                None
+            };
+
+            let lib_info = SymbolManager::library_info_for_binary_at_path(
+                Path::new(path),
+                disambiguator.clone(),
+            )
+            .await
+            .unwrap();
+
+            let member_name = match &lib_info.arch {
+                Some(name) => name.to_owned(),
+                None => format!(
+                    "Fat32 archive member with cputype {} and cpusubtype {}",
+                    member.cputype(),
+                    member.cpusubtype()
+                ),
+            };
 
             if member_start_file_offset < previous_member_end_file_offset {
                 panic!("Overlapping fat archive members: Member with arch {member_name} starts at file offset {member_start_file_offset:#x} which is before the end file offset {previous_member_end_file_offset:#x} of member with arch {}", previous_member_name.unwrap());
@@ -108,23 +124,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 },
             );
             let member_stack = profile.intern_stack(thread, Some(root_stack), member_frame);
-
-            let data = &data[member_start_file_offset as usize..][..member_size as usize];
-            let object_file = File::parse(data).unwrap();
-
-            let disambiguator = if let Ok(Some(uuid)) = object_file.mach_uuid() {
-                let uuid = Uuid::from_bytes(uuid);
-                Some(MultiArchDisambiguator::DebugId(DebugId::from_uuid(uuid)))
-            } else {
-                None
-            };
-
-            let lib_info = SymbolManager::library_info_for_binary_at_path(
-                Path::new(path),
-                disambiguator.clone(),
-            )
-            .await
-            .unwrap();
 
             let symbol_map = symbol_manager
                 .load_symbol_map_for_binary_at_path(Path::new(path), disambiguator)
@@ -535,35 +534,4 @@ async fn process_section(
     );
 
     pb.finish_with_message("Section processed");
-}
-
-/// Converts a cpu type/subtype pair into the architecture name.
-///
-/// For example, this converts `CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E` to `Some("arm64e")`.
-fn macho_arch_name_for_cpu_type(cputype: u32, cpusubtype: u32) -> Option<&'static str> {
-    use object::macho::*;
-    let s = match (cputype, cpusubtype) {
-        (CPU_TYPE_X86, _) => "i386",
-        (CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_H) => "x86_64h",
-        (CPU_TYPE_X86_64, _) => "x86_64",
-        (CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64E) => "arm64e",
-        (CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64_V8) => "arm64v8",
-        (CPU_TYPE_ARM64, _) => "arm64",
-        (CPU_TYPE_ARM64_32, CPU_SUBTYPE_ARM64_32_V8) => "arm64_32v8",
-        (CPU_TYPE_ARM64_32, _) => "arm64_32",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V5TEJ) => "armv5",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V6) => "armv6",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V6M) => "armv6m",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7) => "armv7",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7F) => "armv7f",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7S) => "armv7s",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7K) => "armv7k",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7M) => "armv7m",
-        (CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V7EM) => "armv7em",
-        (CPU_TYPE_ARM, _) => "arm",
-        (CPU_TYPE_POWERPC, CPU_SUBTYPE_POWERPC_ALL) => "ppc",
-        (CPU_TYPE_POWERPC64, CPU_SUBTYPE_POWERPC_ALL) => "ppc64",
-        _ => return None,
-    };
-    Some(s)
 }
