@@ -3,9 +3,8 @@ use std::convert::TryFrom;
 use std::path::Path;
 
 use fxprof_processed_profile::{
-    CategoryHandle, CategoryPairHandle, CpuDelta, Frame, FrameFlags, FrameHandle, FrameInfo,
-    LibraryInfo, Profile, ReferenceTimestamp, SamplingInterval, StackHandle, ThreadHandle,
-    Timestamp, WeightType,
+    CategoryHandle, CpuDelta, FrameFlags, FrameHandle, LibraryInfo, Profile, ReferenceTimestamp,
+    SamplingInterval, StackHandle, ThreadHandle, Timestamp, WeightType,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use mimalloc::MiMalloc;
@@ -42,18 +41,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let process = profile.add_process(file_name, 0, Timestamp::from_millis_since_reference(0.));
     let thread = profile.add_thread(process, 0, Timestamp::from_millis_since_reference(0.), true);
     profile.set_thread_samples_weight_type(thread, WeightType::Bytes);
-    let category = CategoryHandle::OTHER.into();
+    let category = CategoryHandle::OTHER;
 
-    let root_s = profile.intern_string("(root)");
-    let root_frame = profile.intern_frame(
-        thread,
-        FrameInfo {
-            frame: Frame::Label(root_s),
-            category_pair: category,
-            flags: FrameFlags::empty(),
-        },
-    );
-    let root_stack = profile.intern_stack(thread, None, root_frame);
+    let root_s = profile.handle_for_string("(root)");
+    let root_frame =
+        profile.handle_for_frame_with_label(thread, root_s, category, FrameFlags::empty());
+    let root_stack = profile.handle_for_stack(thread, root_frame, None);
 
     let config = SymbolManagerConfig::default()
         .respect_nt_symbol_path(true)
@@ -114,16 +107,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
 
-            let member_s = profile.intern_string(&member_name);
-            let member_frame = profile.intern_frame(
+            let member_s = profile.handle_for_string(&member_name);
+            let member_frame = profile.handle_for_frame_with_label(
                 thread,
-                FrameInfo {
-                    frame: Frame::Label(member_s),
-                    category_pair: category,
-                    flags: FrameFlags::empty(),
-                },
+                member_s,
+                category,
+                FrameFlags::empty(),
             );
-            let member_stack = profile.intern_stack(thread, Some(root_stack), member_frame);
+            let member_stack = profile.handle_for_stack(thread, member_frame, Some(root_stack));
 
             let symbol_map = symbol_manager
                 .load_symbol_map_for_binary_at_path(Path::new(path), disambiguator)
@@ -226,7 +217,7 @@ async fn process_binary(
     object_file: &File<'_>,
     lib_info: wholesym::LibraryInfo,
     symbol_map: wholesym::SymbolMap,
-    category: CategoryPairHandle,
+    category: CategoryHandle,
     timestamp_offset: u64,
     binary_file_size: u64,
 ) {
@@ -336,32 +327,24 @@ async fn process_section(
     section: &Section,
     symbol_map: &wholesym::SymbolMap,
     base_addr: u64,
-    category: CategoryPairHandle,
+    category: CategoryHandle,
     timestamp_offset: u64,
 ) {
-    let section_s = profile.intern_string(&section.name);
-    let section_frame = profile.intern_frame(
-        thread,
-        FrameInfo {
-            frame: Frame::Label(section_s),
-            category_pair: category,
-            flags: FrameFlags::empty(),
-        },
-    );
-    let section_stack = profile.intern_stack(thread, Some(root_stack), section_frame);
+    let section_s = profile.handle_for_string(&section.name);
+    let section_frame =
+        profile.handle_for_frame_with_label(thread, section_s, category, FrameFlags::empty());
+    let section_stack = profile.handle_for_stack(thread, section_frame, Some(root_stack));
 
     if section.kind != SectionKind::Text {
-        let section_kind_str = profile.intern_string(&format!("{:?}", section.kind));
-        let section_kind_frame = profile.intern_frame(
+        let section_kind_str = profile.handle_for_string(&format!("{:?}", section.kind));
+        let section_kind_frame = profile.handle_for_frame_with_label(
             thread,
-            FrameInfo {
-                frame: Frame::Label(section_kind_str),
-                category_pair: category,
-                flags: FrameFlags::empty(),
-            },
+            section_kind_str,
+            category,
+            FrameFlags::empty(),
         );
         let section_kind_stack =
-            profile.intern_stack(thread, Some(section_stack), section_kind_frame);
+            profile.handle_for_stack(thread, section_kind_frame, Some(section_stack));
         profile.add_sample(
             thread,
             Timestamp::from_millis_since_reference((timestamp_offset + section.file_offset) as f64),
@@ -376,27 +359,24 @@ async fn process_section(
     let section_start_rel = section.svma - base_addr;
     let section_end_rel = section.svma + section_size - base_addr;
 
-    let unknown_path_str = profile.intern_string("<unknown path>");
-    let unknown_path_frame = profile.intern_frame(
+    let unknown_path_str = profile.handle_for_string("<unknown path>");
+    let unknown_path_frame = profile.handle_for_frame_with_label(
         thread,
-        FrameInfo {
-            frame: Frame::Label(unknown_path_str),
-            category_pair: category,
-            flags: FrameFlags::empty(),
-        },
+        unknown_path_str,
+        category,
+        FrameFlags::empty(),
     );
 
-    let unknown_bytes_str = profile.intern_string("<unknown bytes>");
-    let unknown_bytes_frame = profile.intern_frame(
+    let unknown_bytes_str = profile.handle_for_string("<unknown bytes>");
+    let unknown_bytes_frame = profile.handle_for_frame_with_label(
         thread,
-        FrameInfo {
-            frame: Frame::Label(unknown_bytes_str),
-            category_pair: category,
-            flags: FrameFlags::empty(),
-        },
+        unknown_bytes_str,
+        category,
+        FrameFlags::empty(),
     );
 
-    let unknown_path_stack = profile.intern_stack(thread, Some(section_stack), unknown_path_frame);
+    let unknown_path_stack =
+        profile.handle_for_stack(thread, unknown_path_frame, Some(section_stack));
 
     let pb = ProgressBar::new(section_size);
     pb.set_style(
@@ -456,7 +436,6 @@ async fn process_section(
         profile,
         &mut stack_prefix_for_path,
     );
-
     next_sample_file_offset += last_stack_bytes;
 
     assert_eq!(
@@ -484,7 +463,7 @@ fn emit_sample_for_address(
     unknown_path_stack: StackHandle,
     unknown_bytes_frame: FrameHandle,
     thread: ThreadHandle,
-    category: CategoryPairHandle,
+    category: CategoryHandle,
     profile: &mut Profile,
     stack_prefix_for_path: &mut HashMap<String, StackHandle>,
 ) {
@@ -500,16 +479,14 @@ fn emit_sample_for_address(
                 for p in path.split(['/', '\\']) {
                     use std::fmt::Write;
                     write!(&mut accum_path, "/{p}").unwrap();
-                    let frame_str = profile.intern_string(&accum_path);
-                    let frame = profile.intern_frame(
+                    let frame_str = profile.handle_for_string(&accum_path);
+                    let frame = profile.handle_for_frame_with_label(
                         thread,
-                        FrameInfo {
-                            frame: Frame::Label(frame_str),
-                            flags: FrameFlags::empty(),
-                            category_pair: category,
-                        },
+                        frame_str,
+                        category,
+                        FrameFlags::empty(),
                     );
-                    path_stack = profile.intern_stack(thread, Some(path_stack), frame);
+                    path_stack = profile.handle_for_stack(thread, frame, Some(path_stack));
                 }
                 stack_prefix_for_path.insert(path.to_owned(), path_stack);
                 path_stack
@@ -528,32 +505,24 @@ fn emit_sample_for_address(
                 let name = f
                     .function
                     .unwrap_or_else(|| format!("unnamed_{symbol_addr:x}"));
-                let name = profile.intern_string(&name);
-                let frame = profile.intern_frame(
+                let name = profile.handle_for_string(&name);
+                let frame = profile.handle_for_frame_with_label(
                     thread,
-                    FrameInfo {
-                        frame: Frame::Label(name),
-                        flags: FrameFlags::empty(),
-                        category_pair: category,
-                    },
+                    name,
+                    category,
+                    FrameFlags::empty(),
                 );
-                s = profile.intern_stack(thread, Some(s), frame);
+                s = profile.handle_for_stack(thread, frame, Some(s));
             }
         } else {
-            let name = profile.intern_string(&addr_info.symbol.name);
-            let frame = profile.intern_frame(
-                thread,
-                FrameInfo {
-                    frame: Frame::Label(name),
-                    flags: FrameFlags::empty(),
-                    category_pair: category,
-                },
-            );
-            s = profile.intern_stack(thread, Some(s), frame);
+            let name = profile.handle_for_string(&addr_info.symbol.name);
+            let frame =
+                profile.handle_for_frame_with_label(thread, name, category, FrameFlags::empty());
+            s = profile.handle_for_stack(thread, frame, Some(s));
         }
         s
     } else {
-        profile.intern_stack(thread, Some(path_stack), unknown_bytes_frame)
+        profile.handle_for_stack(thread, unknown_bytes_frame, Some(path_stack))
     };
 
     profile.add_sample(
