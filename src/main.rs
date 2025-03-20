@@ -3,9 +3,9 @@ use std::convert::TryFrom;
 use std::path::Path;
 
 use fxprof_processed_profile::{
-    CategoryHandle, CategoryPairHandle, CpuDelta, Frame, FrameFlags, FrameInfo, LibraryInfo,
-    Profile, ReferenceTimestamp, SamplingInterval, StackHandle, ThreadHandle, Timestamp,
-    WeightType,
+    CategoryHandle, CategoryPairHandle, CpuDelta, Frame, FrameFlags, FrameHandle, FrameInfo,
+    LibraryInfo, Profile, ReferenceTimestamp, SamplingInterval, StackHandle, ThreadHandle,
+    Timestamp, WeightType,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use mimalloc::MiMalloc;
@@ -408,7 +408,7 @@ async fn process_section(
             .progress_chars("#>-"),
     );
 
-    let mut last_stack = None;
+    let mut last_stack_addr_info = None;
     let mut last_stack_bytes = 0;
 
     let mut next_sample_file_offset = section.file_offset;
@@ -423,107 +423,40 @@ async fn process_section(
             .lookup(wholesym::LookupAddress::Relative(addr as u32))
             .await;
 
-        fn get_outer_function_location(
-            addr_info: &Option<wholesym::AddressInfo>,
-        ) -> Option<String> {
-            let frames = addr_info.as_ref()?.frames.as_ref()?;
-            let file_path = frames.last()?.file_path.as_ref()?;
-            Some(file_path.display_path())
+        if last_stack_bytes != 0 && addr_info != last_stack_addr_info {
+            emit_sample_for_address(
+                last_stack_addr_info,
+                Timestamp::from_millis_since_reference(
+                    (timestamp_offset + next_sample_file_offset) as f64,
+                ),
+                last_stack_bytes,
+                section_stack,
+                unknown_path_stack,
+                unknown_bytes_frame,
+                thread,
+                category,
+                profile,
+                &mut stack_prefix_for_path,
+            );
+            next_sample_file_offset += last_stack_bytes;
+            last_stack_bytes = 0;
         }
-
-        let path_stack = if let Some(path) = get_outer_function_location(&addr_info) {
-            match stack_prefix_for_path.get(&path) {
-                Some(ps) => *ps,
-                None => {
-                    let path = path.trim_start_matches("C:\\b\\s\\w\\ir\\cache\\builder\\");
-                    let mut accum_path = String::new();
-
-                    let mut path_stack = section_stack;
-
-                    for p in path.split(['/', '\\']) {
-                        use std::fmt::Write;
-                        write!(&mut accum_path, "/{p}").unwrap();
-                        let frame_str = profile.intern_string(&accum_path);
-                        let frame = profile.intern_frame(
-                            thread,
-                            FrameInfo {
-                                frame: Frame::Label(frame_str),
-                                flags: FrameFlags::empty(),
-                                category_pair: category,
-                            },
-                        );
-                        path_stack = profile.intern_stack(thread, Some(path_stack), frame);
-                    }
-                    stack_prefix_for_path.insert(path.to_owned(), path_stack);
-                    path_stack
-                }
-            }
-        } else {
-            unknown_path_stack
-        };
-
-        let stack = if let Some(addr_info) = addr_info {
-            let symbol_addr = addr_info.symbol.address;
-            let mut s = path_stack;
-            if let Some(mut frames) = addr_info.frames {
-                frames.reverse();
-                for f in frames {
-                    let name = f
-                        .function
-                        .unwrap_or_else(|| format!("unnamed_{symbol_addr:x}"));
-                    let name = profile.intern_string(&name);
-                    let frame = profile.intern_frame(
-                        thread,
-                        FrameInfo {
-                            frame: Frame::Label(name),
-                            flags: FrameFlags::empty(),
-                            category_pair: category,
-                        },
-                    );
-                    s = profile.intern_stack(thread, Some(s), frame);
-                }
-            } else {
-                let name = profile.intern_string(&addr_info.symbol.name);
-                let frame = profile.intern_frame(
-                    thread,
-                    FrameInfo {
-                        frame: Frame::Label(name),
-                        flags: FrameFlags::empty(),
-                        category_pair: category,
-                    },
-                );
-                s = profile.intern_stack(thread, Some(s), frame);
-            }
-            s
-        } else {
-            profile.intern_stack(thread, Some(path_stack), unknown_bytes_frame)
-        };
-
-        if let Some(last_stack) = last_stack {
-            if stack != last_stack {
-                profile.add_sample(
-                    thread,
-                    Timestamp::from_millis_since_reference(
-                        (timestamp_offset + next_sample_file_offset) as f64,
-                    ),
-                    Some(last_stack),
-                    CpuDelta::ZERO,
-                    i32::try_from(last_stack_bytes).unwrap(),
-                );
-                next_sample_file_offset += last_stack_bytes;
-                last_stack_bytes = 0;
-            }
-        }
-        last_stack = Some(stack);
+        last_stack_addr_info = addr_info;
         last_stack_bytes += 1;
     }
-    profile.add_sample(
-        thread,
+    emit_sample_for_address(
+        last_stack_addr_info,
         Timestamp::from_millis_since_reference((timestamp_offset + next_sample_file_offset) as f64),
-        last_stack,
-        CpuDelta::ZERO,
-        i32::try_from(last_stack_bytes).unwrap(),
+        last_stack_bytes,
+        section_stack,
+        unknown_path_stack,
+        unknown_bytes_frame,
+        thread,
+        category,
+        profile,
+        &mut stack_prefix_for_path,
     );
+
     next_sample_file_offset += last_stack_bytes;
 
     assert_eq!(
@@ -534,4 +467,100 @@ async fn process_section(
     );
 
     pb.finish_with_message("Section processed");
+}
+
+fn get_outer_function_location(addr_info: &Option<wholesym::AddressInfo>) -> Option<String> {
+    let frames = addr_info.as_ref()?.frames.as_ref()?;
+    let file_path = frames.last()?.file_path.as_ref()?;
+    Some(file_path.display_path())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_sample_for_address(
+    addr_info: Option<wholesym::AddressInfo>,
+    timestamp: Timestamp,
+    bytes: u64,
+    root_stack: StackHandle,
+    unknown_path_stack: StackHandle,
+    unknown_bytes_frame: FrameHandle,
+    thread: ThreadHandle,
+    category: CategoryPairHandle,
+    profile: &mut Profile,
+    stack_prefix_for_path: &mut HashMap<String, StackHandle>,
+) {
+    let path_stack = if let Some(path) = get_outer_function_location(&addr_info) {
+        match stack_prefix_for_path.get(&path) {
+            Some(ps) => *ps,
+            None => {
+                let path = path.trim_start_matches("C:\\b\\s\\w\\ir\\cache\\builder\\");
+                let mut accum_path = String::new();
+
+                let mut path_stack = root_stack;
+
+                for p in path.split(['/', '\\']) {
+                    use std::fmt::Write;
+                    write!(&mut accum_path, "/{p}").unwrap();
+                    let frame_str = profile.intern_string(&accum_path);
+                    let frame = profile.intern_frame(
+                        thread,
+                        FrameInfo {
+                            frame: Frame::Label(frame_str),
+                            flags: FrameFlags::empty(),
+                            category_pair: category,
+                        },
+                    );
+                    path_stack = profile.intern_stack(thread, Some(path_stack), frame);
+                }
+                stack_prefix_for_path.insert(path.to_owned(), path_stack);
+                path_stack
+            }
+        }
+    } else {
+        unknown_path_stack
+    };
+
+    let stack = if let Some(addr_info) = addr_info {
+        let symbol_addr = addr_info.symbol.address;
+        let mut s = path_stack;
+        if let Some(mut frames) = addr_info.frames {
+            frames.reverse();
+            for f in frames {
+                let name = f
+                    .function
+                    .unwrap_or_else(|| format!("unnamed_{symbol_addr:x}"));
+                let name = profile.intern_string(&name);
+                let frame = profile.intern_frame(
+                    thread,
+                    FrameInfo {
+                        frame: Frame::Label(name),
+                        flags: FrameFlags::empty(),
+                        category_pair: category,
+                    },
+                );
+                s = profile.intern_stack(thread, Some(s), frame);
+            }
+        } else {
+            let name = profile.intern_string(&addr_info.symbol.name);
+            let frame = profile.intern_frame(
+                thread,
+                FrameInfo {
+                    frame: Frame::Label(name),
+                    flags: FrameFlags::empty(),
+                    category_pair: category,
+                },
+            );
+            s = profile.intern_stack(thread, Some(s), frame);
+        }
+        s
+    } else {
+        profile.intern_stack(thread, Some(path_stack), unknown_bytes_frame)
+    };
+
+    profile.add_sample(
+        thread,
+        timestamp,
+        Some(stack),
+        CpuDelta::ZERO,
+        i32::try_from(bytes).unwrap(),
+    );
 }
