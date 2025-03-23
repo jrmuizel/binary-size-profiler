@@ -20,4 +20,3 @@ indicatif = "0.17"
 
 [profile.release]
 debug = true
-symbol-mangling-version = "v0"
