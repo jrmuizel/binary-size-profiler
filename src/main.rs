@@ -3,9 +3,7 @@ use std::convert::TryFrom;
 use std::path::Path;
 
 use fxprof_processed_profile::{
-    CategoryHandle, CpuDelta, FrameAddress, FrameFlags, FrameHandle, FrameSymbolInfo,
-    LibraryHandle, LibraryInfo, Profile, ReferenceTimestamp, SamplingInterval, SourceLocation,
-    StackHandle, StringHandle, Symbol, ThreadHandle, Timestamp, WeightType,
+    CategoryHandle, CpuDelta, FrameAddress, FrameFlags, FrameHandle, FrameSymbolInfo, LibraryHandle, LibraryInfo, Profile, ReferenceTimestamp, SamplingInterval, SourceLocation, StackHandle, StringHandle, Symbol, ThreadHandle, TimelineUnit, Timestamp, WeightType
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use mimalloc::MiMalloc;
@@ -38,6 +36,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ReferenceTimestamp::from_millis_since_unix_epoch(0.),
         SamplingInterval::from_hz(1000.),
     );
+
+    profile.set_timeline_unit(TimelineUnit::Bytes);
 
     let process = profile.add_process(file_name, 0, Timestamp::from_millis_since_reference(0.));
     let thread = profile.add_thread(process, 0, Timestamp::from_millis_since_reference(0.), true);
