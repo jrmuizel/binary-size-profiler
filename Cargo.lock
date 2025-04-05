@@ -1442,8 +1442,7 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97e73d38bb04a373dba1260af91d4b0010e84cecd92d20b8e9949a910d5b9cbb"
+source = "git+https://github.com/mstange/samply?rev=a1a651ef087d9652cc8b9e1fcd32d91722f81f92#a1a651ef087d9652cc8b9e1fcd32d91722f81f92"
 dependencies = [
  "addr2line",
  "bitflags",
@@ -2006,8 +2005,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ea291707798a4b15f75d46418b6f7c5a044cce8d55e2f18584ccebcdb8b4354"
+source = "git+https://github.com/mstange/samply?rev=a1a651ef087d9652cc8b9e1fcd32d91722f81f92#a1a651ef087d9652cc8b9e1fcd32d91722f81f92"
 dependencies = [
  "async-compression",
  "bytes",
