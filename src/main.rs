@@ -394,7 +394,6 @@ async fn process_section(
 
     let mut pending_sample_relative_address = 0;
     let mut pending_sample_addr_info = None;
-    let mut pending_sample_stack = None;
     let mut pending_sample_bytes = 0;
     let mut pending_sample_file_offset = section.file_offset;
 
@@ -412,9 +411,13 @@ async fn process_section(
             pending_sample_addr_info = addr_info;
             pending_sample_relative_address = addr as u32;
         } else if addr_info != pending_sample_addr_info {
-            let sample_stack = stack_for_address(
+            emit_sample_for_address(
                 pending_sample_relative_address,
                 pending_sample_addr_info,
+                Timestamp::from_millis_since_reference(
+                    (timestamp_offset + pending_sample_file_offset) as f64,
+                ),
+                pending_sample_bytes,
                 section_stack,
                 unknown_path_stack,
                 unknown_bytes_frame,
@@ -424,28 +427,20 @@ async fn process_section(
                 profile,
                 &mut stack_prefix_for_path,
             );
+            pending_sample_file_offset += pending_sample_bytes;
+            pending_sample_relative_address = addr as u32;
             pending_sample_addr_info = addr_info;
-            if Some(sample_stack) != pending_sample_stack {
-                profile.add_sample(
-                    thread,
-                    Timestamp::from_millis_since_reference(
-                        (timestamp_offset + pending_sample_file_offset) as f64,
-                    ),
-                    pending_sample_stack,
-                    CpuDelta::ZERO,
-                    i32::try_from(pending_sample_bytes).unwrap(),
-                );
-                pending_sample_file_offset += pending_sample_bytes;
-                pending_sample_stack = Some(sample_stack);
-                pending_sample_relative_address = addr as u32;
-                pending_sample_bytes = 0;
-            }
+            pending_sample_bytes = 0;
         }
         pending_sample_bytes += 1;
     }
-    let pending_sample_stack = stack_for_address(
+    emit_sample_for_address(
         pending_sample_relative_address,
         pending_sample_addr_info,
+        Timestamp::from_millis_since_reference(
+            (timestamp_offset + pending_sample_file_offset) as f64,
+        ),
+        pending_sample_bytes,
         section_stack,
         unknown_path_stack,
         unknown_bytes_frame,
@@ -454,15 +449,6 @@ async fn process_section(
         category,
         profile,
         &mut stack_prefix_for_path,
-    );
-    profile.add_sample(
-        thread,
-        Timestamp::from_millis_since_reference(
-            (timestamp_offset + pending_sample_file_offset) as f64,
-        ),
-        Some(pending_sample_stack),
-        CpuDelta::ZERO,
-        i32::try_from(pending_sample_bytes).unwrap(),
     );
     pending_sample_file_offset += pending_sample_bytes;
 
@@ -527,9 +513,11 @@ fn get_special_path(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn stack_for_address(
+fn emit_sample_for_address(
     relative_address: u32,
     addr_info: Option<wholesym::AddressInfo>,
+    timestamp: Timestamp,
+    bytes: u64,
     root_stack: StackHandle,
     unknown_path_stack: StackHandle,
     unknown_bytes_frame: FrameHandle,
@@ -538,7 +526,7 @@ fn stack_for_address(
     category: CategoryHandle,
     profile: &mut Profile,
     stack_prefix_for_path: &mut HashMap<String, StackHandle>,
-) -> StackHandle {
+) {
     let path_stack = get_path_stack(
         &addr_info,
         root_stack,
@@ -549,7 +537,7 @@ fn stack_for_address(
     )
     .unwrap_or(unknown_path_stack);
 
-    if let Some(addr_info) = addr_info {
+    let stack = if let Some(addr_info) = addr_info {
         let symbol = Symbol {
             address: addr_info.symbol.address,
             size: addr_info.symbol.size,
@@ -610,5 +598,13 @@ fn stack_for_address(
         s
     } else {
         profile.handle_for_stack(thread, unknown_bytes_frame, Some(path_stack))
-    }
+    };
+
+    profile.add_sample(
+        thread,
+        timestamp,
+        Some(stack),
+        CpuDelta::ZERO,
+        i32::try_from(bytes).unwrap(),
+    );
 }
