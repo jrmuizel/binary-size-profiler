@@ -3,7 +3,9 @@ use std::convert::TryFrom;
 use std::path::Path;
 
 use fxprof_processed_profile::{
-    CategoryHandle, CpuDelta, FrameAddress, FrameFlags, FrameHandle, FrameSymbolInfo, LibraryHandle, LibraryInfo, Profile, ReferenceTimestamp, SamplingInterval, SourceLocation, StackHandle, StringHandle, Symbol, ThreadHandle, TimelineUnit, Timestamp, WeightType
+    CategoryHandle, CpuDelta, FrameAddress, FrameFlags, FrameHandle, FrameSymbolInfo,
+    LibraryHandle, LibraryInfo, Profile, ReferenceTimestamp, SamplingInterval, SourceLocation,
+    StackHandle, StringHandle, Symbol, ThreadHandle, TimelineUnit, Timestamp, WeightType,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use mimalloc::MiMalloc;
