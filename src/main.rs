@@ -223,12 +223,16 @@ async fn process_binary(
     timestamp_offset: u64,
     binary_file_size: u64,
 ) {
+    let name = lib_info.name.unwrap();
+    let debug_name = lib_info.debug_name.unwrap_or_else(|| name.clone());
+    let path = lib_info.path.unwrap_or_else(|| name.clone());
+    let debug_path = lib_info.debug_path.unwrap_or_else(|| path.clone());
     let lib = LibraryInfo {
-        name: lib_info.name.unwrap(),
-        debug_name: lib_info.debug_name.unwrap(),
-        path: lib_info.path.unwrap(),
-        debug_path: lib_info.debug_path.unwrap(),
-        debug_id: lib_info.debug_id.unwrap(),
+        name,
+        debug_name,
+        path,
+        debug_path,
+        debug_id: lib_info.debug_id.unwrap_or_default(),
         code_id: lib_info.code_id.map(|ci| ci.to_string()),
         arch: lib_info.arch,
         symbol_table: None,
