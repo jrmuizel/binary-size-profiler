@@ -37,7 +37,7 @@ You can see this in the source view, which opens when you double-click a functio
 
 You can also see the assembly code of the double-clicked function. There's one caveat: If you open the assembly view for a function which has multiple monomorphized versions with the same name, the assembly view picks one arbitrary monomorphization. Follow [PR #5349](https://github.com/firefox-devtools/profiler/pull/5349) for updates on the ability to see all monomorphizations.
 
-The source view and assembly view only work locally, before the profile is uploaded. The shared profile does not contain source code or assembly code. Follow [issue #4018](https://github.com/firefox-devtools/profiler/issues/4018) updates on this.
+The source view and assembly view only work locally, before the profile is uploaded. The shared profile does not contain source code or assembly code. Follow [issue #4018](https://github.com/firefox-devtools/profiler/issues/4018) for updates on this.
 
 ## How does it work?
 
