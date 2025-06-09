@@ -1,5 +1,7 @@
 # binary-size-profiler
 
+![](static/readme-screenshot-2025-06-09.png)
+
 This tool takes a binary and its debug info, and generates a binary size profile.
 
 Example profile: https://share.firefox.dev/3SJx8gs
