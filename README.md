@@ -14,6 +14,20 @@ This opens the generated profile in https://profiler.firefox.com/.
 
 [Install samply as described in its readme.](https://github.com/mstange/samply?tab=readme-ov-file#installation) `samply` is needed for the source view and the assembly view to show your local files.
 
+The profile linked above took 5 seconds to generate on an M1 Max, for a 5.2MB binary with a 16MB breakpad symbol file. The output was a 73.3MB `output.json` file (9MB gzipped).
+
+## Usage with Rust
+
+Debug information is required for useful output. When you use the binary size profiler on a Rust project, compile your project with `cargo build --profile profiling` and declare a system-wide cargo profile with the name `profiling` in `~/.cargo/config.toml`:
+
+```toml
+[profile.profiling]
+inherits = "release"
+debug = true
+```
+
+Then run this tool on `your-rust-project/target/profiling/your-binary`.
+
 ## Features
 
 The profile shows information about inlined functions. So you can not only see which "outer" functions take the most space, but also which inlined calls within each outer function take space. This lets you find functions which contribute a lot of binary size by being inlined into lots of different places.
@@ -34,7 +48,7 @@ We walk the bytes in the binary one by one, from front to back. For every byte i
 ## Known issues
 
 - Hardcoded to the Mozilla symbol server: When looking up debug information, this tool makes a request to symbols.mozilla.org with the binary name and its debug ID. This makes for a nice experience when you run this tool on official Firefox binaries, but it's not very useful for other consumers of this tool.
-- Performance: The current implementation is really dumb and hasn't been optimized.
+- Output size: For large binaries, the output JSON can be prohibitively large. For example, this tool cannot handle `xul.dll` from Firefox, which is 162MB big. It creates over 3GB of JSON, which is too much for the front-end.
 - Confusing byte counts in the assembly view: To save space in the profile JSON, we don't write down the byte count for every instruction. We only emit a new sample for an instruction address if the function + source information about that address is different from the information for the previous byte.
 - Incomplete attribution for some bytes: For example, on macOS, we don't break down usage by mach-O segment, only by mach-O section. This means that symbol tables are currently attributed to the "root" node of the binary rather than to the `__LINKEDIT` segment. There are lots of improvements we could make to add more fine-grained information.
 
