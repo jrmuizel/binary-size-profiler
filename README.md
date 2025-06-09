@@ -30,12 +30,12 @@ Then run this tool on `your-rust-project/target/profiling/your-binary`.
 
 ## Features
 
-The profile shows information about inlined functions. So you can not only see which "outer" functions take the most space, but also which inlined calls within each outer function take space. This lets you find functions which contribute a lot of binary size by being inlined into lots of different places.
+The profile shows information about inlined functions. This means that, in addition to seeing which "outer" functions take the most space, you can see *which inlined calls within each outer function* take up how much space. This lets you find functions which contribute a lot of binary size by being inlined into lots of different places.
 
 The profile also shows the number of instruction bytes per line of source code.
 You can see this in the source view, which opens when you double-click a function in the call tree.
 
-You can also see the assembly code of the double-clicked function. When the assembly view is opened for a function which has multiple monomorphized versions with the same (mangled) name, the assembly view picks one arbitrary monomorphization. Follow [PR #5349](https://github.com/firefox-devtools/profiler/pull/5349) for updates on the ability to see all monomorphizations.
+You can also see the assembly code of the double-clicked function. There's one caveat: If you open the assembly view for a function which has multiple monomorphized versions with the same name, the assembly view picks one arbitrary monomorphization. Follow [PR #5349](https://github.com/firefox-devtools/profiler/pull/5349) for updates on the ability to see all monomorphizations.
 
 The source view and assembly view only work locally, before the profile is uploaded. The shared profile does not contain source code or assembly code. Follow [issue #4018](https://github.com/firefox-devtools/profiler/issues/4018) updates on this.
 
@@ -49,7 +49,7 @@ We walk the bytes in the binary one by one, from front to back. For every byte i
 
 - Hardcoded to the Mozilla symbol server: When looking up debug information, this tool makes a request to symbols.mozilla.org with the binary name and its debug ID. This makes for a nice experience when you run this tool on official Firefox binaries, but it's not very useful for other consumers of this tool.
 - Output size: For large binaries, the output JSON can be prohibitively large. For example, this tool cannot handle `xul.dll` from Firefox, which is 162MB big. It creates over 3GB of JSON, which is too much for the front-end.
-- Confusing byte counts in the assembly view: To save space in the profile JSON, we don't write down the byte count for every instruction. We only emit a new sample for an instruction address if the function + source information about that address is different from the information for the previous byte.
+- Confusing byte counts in the assembly view: To save space in the profile JSON, we don't write down the byte count for every instruction. We only emit a new sample for an instruction address if the function + source information about that address is different from the information for the previous byte. This often makes it look as if one instruction took 20 bytes and the next four instructions took zero bytes each. You need to imagine the 20 bytes being "spread out" over the whole hunk of instructions until the next sample count.
 - Incomplete attribution for some bytes: For example, on macOS, we don't break down usage by mach-O segment, only by mach-O section. This means that symbol tables are currently attributed to the "root" node of the binary rather than to the `__LINKEDIT` segment. There are lots of improvements we could make to add more fine-grained information.
 
 ## License
