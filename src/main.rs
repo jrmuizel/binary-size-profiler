@@ -401,7 +401,7 @@ async fn process_section(
     let mut pending_sample_file_offset = section.file_offset;
 
     let mut stack_prefix_for_path: HashMap<SourceFilePathHandle, StackHandle> = HashMap::new();
-    for addr in dbg!(section_start_rel..section_end_rel /* .min(40326317)*/) {
+    for addr in section_start_rel..section_end_rel {
         if addr & 0xffff == 0 {
             pb.set_position(addr - section_start_rel);
         }
