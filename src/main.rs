@@ -4,8 +4,8 @@ use std::path::Path;
 
 use fxprof_processed_profile::{
     CategoryHandle, CpuDelta, FrameAddress, FrameFlags, FrameHandle, FrameSymbolInfo,
-    LibraryHandle, LibraryInfo, Profile, ReferenceTimestamp, SamplingInterval, SourceLocation,
-    StackHandle, StringHandle, Symbol, ThreadHandle, TimelineUnit, Timestamp, WeightType,
+    LibraryHandle, LibraryInfo, Profile, ProfileFormat, ReferenceTimestamp, SamplingInterval,
+    SourceLocation, StackHandle, StringHandle, ThreadHandle, TimelineUnit, Timestamp, WeightType,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use mimalloc::MiMalloc;
@@ -49,9 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let category = CategoryHandle::OTHER;
 
     let root_s = profile.handle_for_string("(root)");
-    let root_frame =
-        profile.handle_for_frame_with_label(thread, root_s, category, FrameFlags::empty());
-    let root_stack = profile.handle_for_stack(thread, root_frame, None);
+    let root_frame = profile.handle_for_frame_with_label(root_s, category, FrameFlags::empty());
+    let root_stack = profile.handle_for_stack(root_frame, None);
 
     let config = SymbolManagerConfig::default()
         .respect_nt_symbol_path(true)
@@ -113,13 +112,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             let member_s = profile.handle_for_string(&member_name);
-            let member_frame = profile.handle_for_frame_with_label(
-                thread,
-                member_s,
-                category,
-                FrameFlags::empty(),
-            );
-            let member_stack = profile.handle_for_stack(thread, member_frame, Some(root_stack));
+            let member_frame =
+                profile.handle_for_frame_with_label(member_s, category, FrameFlags::empty());
+            let member_stack = profile.handle_for_stack(member_frame, Some(root_stack));
 
             let symbol_map = symbol_manager
                 .load_symbol_map_for_binary_at_path(Path::new(path), disambiguator)
@@ -199,7 +194,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let output_file = std::fs::File::create("output.json").unwrap();
     let writer = std::io::BufWriter::new(output_file);
-    serde_json::to_writer(writer, &profile).unwrap();
+    profile.to_writer(writer, ProfileFormat::Json).unwrap();
 
     Ok(())
 }
@@ -342,19 +337,14 @@ async fn process_section(
 ) {
     let section_s = profile.handle_for_string(&section.name);
     let section_frame =
-        profile.handle_for_frame_with_label(thread, section_s, category, FrameFlags::empty());
-    let section_stack = profile.handle_for_stack(thread, section_frame, Some(root_stack));
+        profile.handle_for_frame_with_label(section_s, category, FrameFlags::empty());
+    let section_stack = profile.handle_for_stack(section_frame, Some(root_stack));
 
     if section.kind != SectionKind::Text {
         let section_kind_str = profile.handle_for_string(&format!("{:?}", section.kind));
-        let section_kind_frame = profile.handle_for_frame_with_label(
-            thread,
-            section_kind_str,
-            category,
-            FrameFlags::empty(),
-        );
-        let section_kind_stack =
-            profile.handle_for_stack(thread, section_kind_frame, Some(section_stack));
+        let section_kind_frame =
+            profile.handle_for_frame_with_label(section_kind_str, category, FrameFlags::empty());
+        let section_kind_stack = profile.handle_for_stack(section_kind_frame, Some(section_stack));
         profile.add_sample(
             thread,
             Timestamp::from_millis_since_reference((timestamp_offset + section.file_offset) as f64),
@@ -370,23 +360,14 @@ async fn process_section(
     let section_end_rel = section.svma + section_size - base_addr;
 
     let unknown_path_str = profile.handle_for_string("<unknown path>");
-    let unknown_path_frame = profile.handle_for_frame_with_label(
-        thread,
-        unknown_path_str,
-        category,
-        FrameFlags::empty(),
-    );
+    let unknown_path_frame =
+        profile.handle_for_frame_with_label(unknown_path_str, category, FrameFlags::empty());
 
     let unknown_bytes_str = profile.handle_for_string("<unknown bytes>");
-    let unknown_bytes_frame = profile.handle_for_frame_with_label(
-        thread,
-        unknown_bytes_str,
-        category,
-        FrameFlags::empty(),
-    );
+    let unknown_bytes_frame =
+        profile.handle_for_frame_with_label(unknown_bytes_str, category, FrameFlags::empty());
 
-    let unknown_path_stack =
-        profile.handle_for_stack(thread, unknown_path_frame, Some(section_stack));
+    let unknown_path_stack = profile.handle_for_stack(unknown_path_frame, Some(section_stack));
 
     let pb = ProgressBar::new(section_size);
     pb.set_style(
@@ -481,7 +462,6 @@ fn get_path_stack(
     addr_info: &Option<wholesym::AddressInfo>,
     symbol_map: &wholesym::SymbolMap,
     root_stack: StackHandle,
-    thread: ThreadHandle,
     category: CategoryHandle,
     profile: &mut Profile,
     stack_prefix_for_path: &mut HashMap<SourceFilePathHandle, StackHandle>,
@@ -501,9 +481,8 @@ fn get_path_stack(
         accum_path.push('/');
         accum_path.push_str(p);
         let frame_str = profile.handle_for_string(&accum_path);
-        let frame =
-            profile.handle_for_frame_with_label(thread, frame_str, category, FrameFlags::empty());
-        path_stack = profile.handle_for_stack(thread, frame, Some(path_stack));
+        let frame = profile.handle_for_frame_with_label(frame_str, category, FrameFlags::empty());
+        path_stack = profile.handle_for_stack(frame, Some(path_stack));
     }
     stack_prefix_for_path.insert(path_handle, path_stack);
     Some(path_stack)
@@ -543,7 +522,6 @@ fn emit_sample_for_address(
         &addr_info,
         symbol_map,
         root_stack,
-        thread,
         category,
         profile,
         stack_prefix_for_path,
@@ -551,21 +529,26 @@ fn emit_sample_for_address(
     .unwrap_or(unknown_path_stack);
 
     let stack = if let Some(addr_info) = addr_info {
-        let symbol = Symbol {
-            address: addr_info.symbol.address,
-            size: addr_info.symbol.size,
-            name: addr_info.symbol.name,
-        };
-        let native_symbol = profile.handle_for_native_symbol(thread, library_handle, &symbol);
+        let symbol = addr_info.symbol;
+        let symbol_name = profile.handle_for_string(&symbol_map.resolve_symbol_name(symbol.name));
+        let native_symbol = profile.handle_for_native_symbol(
+            library_handle,
+            symbol.address,
+            symbol.size,
+            symbol_name,
+        );
         let mut s = path_stack;
         if let Some(mut frames) = addr_info.frames {
             frames.reverse();
             for (inline_depth, f) in frames.into_iter().enumerate() {
-                let name = f.function.unwrap_or_else(|| symbol.name.clone());
-                let name = profile.handle_for_string(&name);
+                let name = match f.function {
+                    Some(function) => {
+                        profile.handle_for_string(&symbol_map.resolve_function_name(function))
+                    }
+                    None => symbol_name,
+                };
                 let file_path = get_special_path(f.file_path, symbol_map, profile);
                 let frame = profile.handle_for_frame_with_address_and_symbol(
-                    thread,
                     FrameAddress::RelativeAddressFromInstructionPointer(
                         library_handle,
                         relative_address,
@@ -577,40 +560,36 @@ fn emit_sample_for_address(
                             file_path,
                             line: f.line_number,
                             col: None,
+                            function_start_line: f.function_start_line,
+                            function_start_col: f.function_start_column,
                         },
                     },
                     inline_depth as u16,
                     category,
                     FrameFlags::empty(),
                 );
-                s = profile.handle_for_stack(thread, frame, Some(s));
+                s = profile.handle_for_stack(frame, Some(s));
             }
         } else {
-            let name = profile.handle_for_string(&symbol.name);
             let frame = profile.handle_for_frame_with_address_and_symbol(
-                thread,
                 FrameAddress::RelativeAddressFromInstructionPointer(
                     library_handle,
                     relative_address,
                 ),
                 FrameSymbolInfo {
-                    name: Some(name),
+                    name: Some(symbol_name),
                     native_symbol,
-                    source_location: SourceLocation {
-                        file_path: None,
-                        line: None,
-                        col: None,
-                    },
+                    source_location: SourceLocation::default(),
                 },
                 0,
                 category,
                 FrameFlags::empty(),
             );
-            s = profile.handle_for_stack(thread, frame, Some(s));
+            s = profile.handle_for_stack(frame, Some(s));
         }
         s
     } else {
-        profile.handle_for_stack(thread, unknown_bytes_frame, Some(path_stack))
+        profile.handle_for_stack(unknown_bytes_frame, Some(path_stack))
     };
 
     profile.add_sample(
