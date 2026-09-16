@@ -7,11 +7,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wholesym = { git = "https://github.com/mstange/samply", rev = "749a1f814704611e0cb6f8da90cb296835e14ada" }
+wholesym = { git = "https://github.com/mstange/samply", rev = "1ff6a85fa855011a3917e2b607a2d48e06e23e50" }
 # wholesym = "0.8.0"
 uuid = "1.12"
 futures = "0.3.31"
-fxprof-processed-profile = { git = "https://github.com/mstange/samply", rev = "749a1f814704611e0cb6f8da90cb296835e14ada" }
+fxprof-processed-profile = { git = "https://github.com/mstange/samply", rev = "1ff6a85fa855011a3917e2b607a2d48e06e23e50" }
 # fxprof-processed-profile = { version = "0.8.0", path = "../samply/fxprof-processed-profile" }
 tokio = { version = "1.38", features = ["rt", "rt-multi-thread", "macros"] }
 mimalloc = { version = "*" }

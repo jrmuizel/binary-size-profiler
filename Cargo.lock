@@ -530,7 +530,7 @@ dependencies = [
 [[package]]
 name = "fxprof-processed-profile"
 version = "0.8.1"
-source = "git+https://github.com/mstange/samply?rev=749a1f814704611e0cb6f8da90cb296835e14ada#749a1f814704611e0cb6f8da90cb296835e14ada"
+source = "git+https://github.com/mstange/samply?rev=1ff6a85fa855011a3917e2b607a2d48e06e23e50#1ff6a85fa855011a3917e2b607a2d48e06e23e50"
 dependencies = [
  "bitflags",
  "debugid",
@@ -1715,7 +1715,7 @@ dependencies = [
 [[package]]
 name = "samply-debugid"
 version = "0.1.0"
-source = "git+https://github.com/mstange/samply?rev=749a1f814704611e0cb6f8da90cb296835e14ada#749a1f814704611e0cb6f8da90cb296835e14ada"
+source = "git+https://github.com/mstange/samply?rev=1ff6a85fa855011a3917e2b607a2d48e06e23e50#1ff6a85fa855011a3917e2b607a2d48e06e23e50"
 dependencies = [
  "debugid",
  "uuid",
@@ -1724,7 +1724,7 @@ dependencies = [
 [[package]]
 name = "samply-object"
 version = "0.1.0"
-source = "git+https://github.com/mstange/samply?rev=749a1f814704611e0cb6f8da90cb296835e14ada#749a1f814704611e0cb6f8da90cb296835e14ada"
+source = "git+https://github.com/mstange/samply?rev=1ff6a85fa855011a3917e2b607a2d48e06e23e50#1ff6a85fa855011a3917e2b607a2d48e06e23e50"
 dependencies = [
  "debugid",
  "object",
@@ -1735,7 +1735,7 @@ dependencies = [
 [[package]]
 name = "samply-symbols"
 version = "0.24.1"
-source = "git+https://github.com/mstange/samply?rev=749a1f814704611e0cb6f8da90cb296835e14ada#749a1f814704611e0cb6f8da90cb296835e14ada"
+source = "git+https://github.com/mstange/samply?rev=1ff6a85fa855011a3917e2b607a2d48e06e23e50#1ff6a85fa855011a3917e2b607a2d48e06e23e50"
 dependencies = [
  "addr2line",
  "bitflags",
@@ -2451,7 +2451,7 @@ dependencies = [
 [[package]]
 name = "wholesym"
 version = "0.8.1"
-source = "git+https://github.com/mstange/samply?rev=749a1f814704611e0cb6f8da90cb296835e14ada#749a1f814704611e0cb6f8da90cb296835e14ada"
+source = "git+https://github.com/mstange/samply?rev=1ff6a85fa855011a3917e2b607a2d48e06e23e50#1ff6a85fa855011a3917e2b607a2d48e06e23e50"
 dependencies = [
  "bytes",
  "core-foundation",
