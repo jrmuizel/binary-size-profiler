@@ -17,7 +17,7 @@ use uuid::Uuid;
 use wholesym::debugid::DebugId;
 use wholesym::samply_symbols::relative_address_base;
 use wholesym::samply_symbols::{object, SourceFilePathHandle};
-use wholesym::{MultiArchDisambiguator, SymbolManager, SymbolManagerConfig};
+use wholesym::{AccessPatternHint, MultiArchDisambiguator, SymbolManager, SymbolManagerConfig};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -236,6 +236,11 @@ async fn process_binary(
     };
 
     let base_addr = relative_address_base(object_file);
+
+    // We look up every address of the text section in ascending order. Telling the symbol map
+    // about this lets it throw away the per-function information it has already moved past,
+    // rather than accumulating it for every function in the binary.
+    symbol_map.set_access_pattern_hint(AccessPatternHint::SequentialLookup);
 
     let library_handle = profile.add_lib(lib);
 
