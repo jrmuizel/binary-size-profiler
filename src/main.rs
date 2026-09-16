@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::convert::TryFrom;
 use std::path::Path;
 
 use fxprof_processed_profile::{
@@ -10,13 +9,13 @@ use fxprof_processed_profile::{
 use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
 use mimalloc::MiMalloc;
-use object::read::macho::{FatArch, MachOFatFile32};
 use object::read::Object;
+use object::read::macho::{FatArch, MachOFatFile32};
 use object::{CompressionFormat, File, FileKind, SectionKind};
 use uuid::Uuid;
 use wholesym::debugid::DebugId;
 use wholesym::samply_symbols::relative_address_base;
-use wholesym::samply_symbols::{object, SourceFilePathHandle};
+use wholesym::samply_symbols::{SourceFilePathHandle, object};
 use wholesym::{AccessPatternHint, MultiArchDisambiguator, SymbolManager, SymbolManagerConfig};
 
 #[global_allocator]
@@ -96,7 +95,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
 
             if member_start_file_offset < previous_member_end_file_offset {
-                panic!("Overlapping fat archive members: Member with arch {member_name} starts at file offset {member_start_file_offset:#x} which is before the end file offset {previous_member_end_file_offset:#x} of member with arch {}", previous_member_name.unwrap());
+                panic!(
+                    "Overlapping fat archive members: Member with arch {member_name} starts at file offset {member_start_file_offset:#x} which is before the end file offset {previous_member_end_file_offset:#x} of member with arch {}",
+                    previous_member_name.unwrap()
+                );
             }
 
             if member_start_file_offset > previous_member_end_file_offset {
@@ -140,7 +142,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let file_end_file_offset = data.len() as u64;
         if file_end_file_offset < previous_member_end_file_offset {
-            panic!("Truncated fat archive member: File size is {file_end_file_offset:#x} which is less than the end file offset {previous_member_end_file_offset:#x} of member {}", previous_member_name.unwrap());
+            panic!(
+                "Truncated fat archive member: File size is {file_end_file_offset:#x} which is less than the end file offset {previous_member_end_file_offset:#x} of member {}",
+                previous_member_name.unwrap()
+            );
         }
 
         if file_end_file_offset > previous_member_end_file_offset {
@@ -275,7 +280,10 @@ async fn process_binary(
         let section_start_file_offset = s.file_offset;
 
         if section_start_file_offset < previous_section_end_file_offset {
-            panic!("Overlapping sections: Section {section_name} starts at file offset {section_start_file_offset:#x} which is before the end file offset {previous_section_end_file_offset:#x} of section {}", previous_section_name.unwrap());
+            panic!(
+                "Overlapping sections: Section {section_name} starts at file offset {section_start_file_offset:#x} which is before the end file offset {previous_section_end_file_offset:#x} of section {}",
+                previous_section_name.unwrap()
+            );
         }
 
         if section_start_file_offset > previous_section_end_file_offset {
@@ -311,7 +319,10 @@ async fn process_binary(
 
     let file_end_file_offset = binary_file_size;
     if file_end_file_offset < previous_section_end_file_offset {
-        panic!("Truncated section: File size is {file_end_file_offset:#x} which is less than the end file offset {previous_section_end_file_offset:#x} of section {}", previous_section_name.unwrap());
+        panic!(
+            "Truncated section: File size is {file_end_file_offset:#x} which is less than the end file offset {previous_section_end_file_offset:#x} of section {}",
+            previous_section_name.unwrap()
+        );
     }
 
     if file_end_file_offset > previous_section_end_file_offset {
