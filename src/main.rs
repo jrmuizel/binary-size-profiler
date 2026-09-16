@@ -192,9 +192,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         0,
     );
 
-    let output_file = std::fs::File::create("output.json").unwrap();
+    let output_file = std::fs::File::create("output.jslb").unwrap();
     let writer = std::io::BufWriter::new(output_file);
-    profile.to_writer(writer, ProfileFormat::Json).unwrap();
+    profile.to_writer(writer, ProfileFormat::JsonSlabs).unwrap();
 
     Ok(())
 }

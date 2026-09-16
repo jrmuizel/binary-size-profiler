@@ -101,7 +101,6 @@ dependencies = [
  "fxprof-processed-profile",
  "indicatif",
  "mimalloc",
- "serde_json",
  "tokio",
  "uuid",
  "wholesym",

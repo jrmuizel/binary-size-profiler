@@ -3,5 +3,6 @@ profile.json
 profile.json.gz
 .DS_Store
 output.json
+output.jslb
 breakpad-symbol-cache
 breakpad-symindex-cache

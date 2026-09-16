@@ -9,7 +9,7 @@ Example profile: https://share.firefox.dev/3SJx8gs
 ```
 # Usage:
 cargo run --release -- /path/to/binary
-samply load output.json
+samply load output.jslb
 ```
 
 This opens the generated profile in https://profiler.firefox.com/.
