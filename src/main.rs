@@ -8,6 +8,7 @@ use fxprof_processed_profile::{
     SourceLocation, StackHandle, StringHandle, ThreadHandle, TimelineUnit, Timestamp, WeightType,
 };
 use indicatif::{ProgressBar, ProgressStyle};
+use memmap2::Mmap;
 use mimalloc::MiMalloc;
 use object::read::macho::{FatArch, MachOFatFile32};
 use object::read::Object;
@@ -23,14 +24,13 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Read;
-
     let path = &std::env::args().nth(1).unwrap();
     let file_name = Path::new(path).file_name().unwrap().to_str().unwrap();
 
-    let mut data = Vec::new();
-    let mut file = std::fs::File::open(path).unwrap();
-    file.read_to_end(&mut data).unwrap();
+    // Map the binary instead of reading it: for a universal XUL this is ~466MB of
+    // resident memory we never have to hold, and the pages we touch are read once.
+    let file = std::fs::File::open(path).unwrap();
+    let data = unsafe { Mmap::map(&file).unwrap() };
 
     let file_kind = FileKind::parse(&data[..]).unwrap();
 

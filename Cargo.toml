@@ -16,6 +16,7 @@ fxprof-processed-profile = { git = "https://github.com/mstange/samply", rev = "7
 tokio = { version = "1.38", features = ["rt", "rt-multi-thread", "macros"] }
 mimalloc = { version = "*" }
 indicatif = "0.17"
+memmap2 = "0.9"
 
 [profile.release]
 debug = true
