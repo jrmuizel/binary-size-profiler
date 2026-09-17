@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::ops::Range;
 
 use fxprof_processed_profile::{
-    FrameAddress, FrameFlags, FrameHandle, FrameSymbolInfo, SourceLocation, StackHandle,
-    StringHandle,
+    FrameAddress, FrameFlags, FrameHandle, FrameSymbolInfo, NativeSymbolHandle, SourceLocation,
+    StackHandle, StringHandle,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use wholesym::samply_symbols::{SourceFilePath, SourceFilePathHandle};
@@ -138,77 +138,81 @@ impl TextWalk {
         addr_info: Option<wholesym::AddressInfo>,
         range: Range<u64>,
     ) {
+        let Some(addr_info) = addr_info else {
+            let stack = b
+                .profile
+                .handle_for_stack(self.unknown_bytes_frame, Some(self.unknown_path_stack));
+            region.leaf(b, range, stack);
+            return;
+        };
+
         let category = b.category(Kind::Code);
+
+        let symbol = &addr_info.symbol;
+        let symbol_name = b
+            .profile
+            .handle_for_string(&ctx.symbol_map.resolve_symbol_name(symbol.name));
+        let native_symbol = b.profile.handle_for_native_symbol(
+            ctx.library_handle,
+            symbol.address,
+            symbol.size,
+            symbol_name,
+        );
+
         let path_stack = self
-            .path_stack(b, ctx, &addr_info)
+            .path_stack(b, ctx, &addr_info, relative_address, native_symbol)
             .unwrap_or(self.unknown_path_stack);
 
-        let stack = if let Some(addr_info) = addr_info {
-            let symbol = addr_info.symbol;
-            let symbol_name = b
-                .profile
-                .handle_for_string(&ctx.symbol_map.resolve_symbol_name(symbol.name));
-            let native_symbol = b.profile.handle_for_native_symbol(
-                ctx.library_handle,
-                symbol.address,
-                symbol.size,
-                symbol_name,
-            );
-            let mut s = path_stack;
-            if let Some(mut frames) = addr_info.frames {
-                frames.reverse();
-                for (inline_depth, f) in frames.into_iter().enumerate() {
-                    let name = match f.function {
-                        Some(function) => b
-                            .profile
-                            .handle_for_string(&ctx.symbol_map.resolve_function_name(function)),
-                        None => symbol_name,
-                    };
-                    let file_path = special_path(b, ctx, f.file_path);
-                    let frame = b.profile.handle_for_frame_with_address_and_symbol(
-                        FrameAddress::RelativeAddressFromInstructionPointer(
-                            ctx.library_handle,
-                            relative_address,
-                        ),
-                        FrameSymbolInfo {
-                            name: Some(name),
-                            native_symbol,
-                            source_location: SourceLocation {
-                                file_path,
-                                line: f.line_number,
-                                col: None,
-                                function_start_line: f.function_start_line,
-                                function_start_col: f.function_start_column,
-                            },
-                        },
-                        inline_depth as u16,
-                        category,
-                        FrameFlags::empty(),
-                    );
-                    s = b.profile.handle_for_stack(frame, Some(s));
-                }
-            } else {
+        let mut stack = path_stack;
+        if let Some(mut frames) = addr_info.frames {
+            frames.reverse();
+            for (inline_depth, f) in frames.into_iter().enumerate() {
+                let name = match f.function {
+                    Some(function) => b
+                        .profile
+                        .handle_for_string(&ctx.symbol_map.resolve_function_name(function)),
+                    None => symbol_name,
+                };
+                let file_path = special_path(b, ctx, f.file_path);
                 let frame = b.profile.handle_for_frame_with_address_and_symbol(
                     FrameAddress::RelativeAddressFromInstructionPointer(
                         ctx.library_handle,
                         relative_address,
                     ),
                     FrameSymbolInfo {
-                        name: Some(symbol_name),
+                        name: Some(name),
                         native_symbol,
-                        source_location: SourceLocation::default(),
+                        source_location: SourceLocation {
+                            file_path,
+                            line: f.line_number,
+                            col: None,
+                            function_start_line: f.function_start_line,
+                            function_start_col: f.function_start_column,
+                        },
                     },
-                    0,
+                    inline_depth as u16,
                     category,
                     FrameFlags::empty(),
                 );
-                s = b.profile.handle_for_stack(frame, Some(s));
+                stack = b.profile.handle_for_stack(frame, Some(stack));
             }
-            s
         } else {
-            b.profile
-                .handle_for_stack(self.unknown_bytes_frame, Some(path_stack))
-        };
+            let frame = b.profile.handle_for_frame_with_address_and_symbol(
+                FrameAddress::RelativeAddressFromInstructionPointer(
+                    ctx.library_handle,
+                    relative_address,
+                ),
+                FrameSymbolInfo {
+                    name: Some(symbol_name),
+                    native_symbol,
+                    source_location: SourceLocation::default(),
+                },
+                0,
+                category,
+                FrameFlags::empty(),
+            );
+            stack = b.profile.handle_for_stack(frame, Some(stack));
+        }
 
         region.leaf(b, range, stack);
     }
@@ -219,7 +223,9 @@ impl TextWalk {
         &mut self,
         b: &mut ProfileBuilder,
         ctx: &BinaryContext<'_>,
-        addr_info: &Option<wholesym::AddressInfo>,
+        addr_info: &wholesym::AddressInfo,
+        relative_address: u32,
+        native_symbol: NativeSymbolHandle,
     ) -> Option<StackHandle> {
         let path_handle = outer_function_location(addr_info)?;
         if let Some(ps) = self.stack_prefix_for_path.get(&path_handle) {
@@ -231,7 +237,7 @@ impl TextWalk {
             .strip_prefix(BUILDER_CHECKOUT_ROOT)
             .unwrap_or(&display_path);
 
-        let file_path = source_path(&source_file_path);
+        let file_path_handle = b.profile.handle_for_string(&source_path(&source_file_path));
         let mut path_stack = self.section_stack;
 
         // Each component is labelled with just its own name, and gets the path
@@ -252,29 +258,58 @@ impl TextWalk {
             }
 
             // A directory gets the displayable path down to it, which is only
-            // ever shown. The last component is the file itself, and gets the
-            // same path as the function frames below it, so that the source
-            // view can fetch it.
+            // ever shown.
             let is_file = end == path.len();
-            let frame_path = if is_file { &file_path } else { &path[..end] };
+            if !is_file {
+                path_stack = b.labelled_stack_with_file_path(
+                    Some(path_stack),
+                    component,
+                    &path[..end],
+                    Kind::Code,
+                );
+                continue;
+            }
 
-            path_stack = b.labelled_stack_with_file_path(
-                Some(path_stack),
-                component,
-                frame_path,
-                Kind::Code,
+            // The last component is the file itself. It gets the same path as
+            // the function frames below it, so that the front-end's source view
+            // can fetch it, and an address to go with that path: a local symbol
+            // server only serves a file once it has been shown an address whose
+            // symbol information refers to that file, and the front-end looks
+            // for that address on the first frame it finds for the file. If
+            // that frame were a plain label frame, the fetch would fail, and
+            // the front-end would cache the failure for the file and never
+            // serve it from the function frames either.
+            //
+            // Any address in the file proves as much as any other, so this is
+            // the first one we happened to see. The stack is cached per file,
+            // so the file gets this one frame and no more.
+            let name = b.profile.handle_for_string(component);
+            let frame = b.profile.handle_for_frame_with_address_and_symbol(
+                FrameAddress::RelativeAddressFromInstructionPointer(
+                    ctx.library_handle,
+                    relative_address,
+                ),
+                FrameSymbolInfo {
+                    name: Some(name),
+                    native_symbol,
+                    source_location: SourceLocation {
+                        file_path: Some(file_path_handle),
+                        ..Default::default()
+                    },
+                },
+                0,
+                b.category(Kind::Code),
+                FrameFlags::empty(),
             );
+            path_stack = b.profile.handle_for_stack(frame, Some(path_stack));
         }
         self.stack_prefix_for_path.insert(path_handle, path_stack);
         Some(path_stack)
     }
 }
 
-fn outer_function_location(
-    addr_info: &Option<wholesym::AddressInfo>,
-) -> Option<SourceFilePathHandle> {
-    let frames = addr_info.as_ref()?.frames.as_ref()?;
-    frames.last()?.file_path
+fn outer_function_location(addr_info: &wholesym::AddressInfo) -> Option<SourceFilePathHandle> {
+    addr_info.frames.as_ref()?.last()?.file_path
 }
 
 fn special_path(
