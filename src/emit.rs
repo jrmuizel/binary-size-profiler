@@ -29,20 +29,44 @@ impl ProfileBuilder {
         self.category
     }
 
-    /// Attribute the bytes in `range` to `stack`.
+    /// Attribute the bytes in `range` to `stack`, as two samples: one opening the
+    /// range at its first byte and one closing it at its last.
+    ///
+    /// The front-end's activity graph fills the space between consecutive
+    /// samples, so a range is only drawn in its own colour if the samples on both
+    /// sides of it are its own. With one sample per range, each range's space
+    /// would be bounded by the next range's sample and take the next range's
+    /// colour.
+    ///
+    /// Adjacent ranges therefore have two samples at the same file offset, one
+    /// closing the earlier range and one opening the later one. The space between
+    /// those is zero wide, so nothing is drawn for it.
     pub fn sample(&mut self, range: Range<u64>, stack: StackHandle) {
-        self.weighted_sample(range.start, range.end - range.start, stack);
+        let bytes = range.end - range.start;
+
+        // The opening sample has a CPU delta of zero because the sample before it
+        // sits at the same file offset, and a CPU delta over a zero-wide gap
+        // would be an infinite height.
+        self.add_sample(range.start, 0, CpuDelta::ZERO, stack);
+
+        // The graph's height is the CPU delta divided by how far apart the two
+        // samples are. One byte of file offset is one millisecond of "time", so a
+        // delta of one millisecond per byte fills the graph to the top.
+        self.add_sample(range.end, bytes, CpuDelta::from_millis(bytes as f64), stack);
     }
 
-    /// Like [`Self::sample`], but allows a zero byte count. A zero-weight sample
-    /// at the end of the file makes the profiler's automatic range detection
-    /// cover the whole file.
-    pub fn weighted_sample(&mut self, file_offset: u64, bytes: u64, stack: StackHandle) {
+    fn add_sample(
+        &mut self,
+        file_offset: u64,
+        bytes: u64,
+        cpu_delta: CpuDelta,
+        stack: StackHandle,
+    ) {
         self.profile.add_sample(
             self.thread,
             Timestamp::from_millis_since_reference(file_offset as f64),
             Some(stack),
-            CpuDelta::ZERO,
+            cpu_delta,
             i32::try_from(bytes).unwrap(),
         );
     }

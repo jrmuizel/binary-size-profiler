@@ -52,11 +52,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Every range closes with a sample at its end, so the last range already puts
+    // a sample at the end of the file, and the profiler's automatic range
+    // detection covers all of it without a sample added by hand here.
     root.finish(&mut b);
-
-    // Add a final sample with zero weight, so that the profiler's automatic time range detection
-    // includes all the file bytes.
-    b.weighted_sample(data.len() as u64, 0, root_stack);
 
     let output_file = std::fs::File::create("output.jslb").unwrap();
     let writer = std::io::BufWriter::new(output_file);
