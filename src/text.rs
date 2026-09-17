@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
@@ -6,7 +7,7 @@ use fxprof_processed_profile::{
     StringHandle,
 };
 use indicatif::{ProgressBar, ProgressStyle};
-use wholesym::samply_symbols::SourceFilePathHandle;
+use wholesym::samply_symbols::{SourceFilePath, SourceFilePathHandle};
 
 use crate::binary::BinaryContext;
 use crate::categories::Kind;
@@ -230,17 +231,39 @@ impl TextWalk {
             .strip_prefix(BUILDER_CHECKOUT_ROOT)
             .unwrap_or(&display_path);
 
-        let mut accum_path = String::new();
+        let file_path = source_path(&source_file_path);
         let mut path_stack = self.section_stack;
 
-        // An absolute path splits into an empty first component. Skipping empty
-        // components keeps it from becoming a frame labelled "/", and keeps the
-        // separator it stands for out of every label below it, which otherwise
-        // read "/", "//builds", "//builds/worker".
-        for component in path.split(['/', '\\']).filter(|c| !c.is_empty()) {
-            accum_path.push('/');
-            accum_path.push_str(component);
-            path_stack = b.labelled_stack(Some(path_stack), &accum_path, Kind::Code);
+        // Each component is labelled with just its own name, and gets the path
+        // up to and including it as its file path. The path is what tells two
+        // directories of the same name apart, so the labels can stay short
+        // without, say, every `src` in the build collapsing into one in the
+        // inverted view.
+        let mut offset = 0;
+        for component in path.split(['/', '\\']) {
+            let end = offset + component.len();
+            offset = end + 1; // Skip the separator.
+
+            // An absolute path splits into an empty first component, and a UNC
+            // or doubled separator into an empty one further in. Neither is
+            // worth a frame of its own.
+            if component.is_empty() {
+                continue;
+            }
+
+            // A directory gets the displayable path down to it, which is only
+            // ever shown. The last component is the file itself, and gets the
+            // same path as the function frames below it, so that the source
+            // view can fetch it.
+            let is_file = end == path.len();
+            let frame_path = if is_file { &file_path } else { &path[..end] };
+
+            path_stack = b.labelled_stack_with_file_path(
+                Some(path_stack),
+                component,
+                frame_path,
+                Kind::Code,
+            );
         }
         self.stack_prefix_for_path.insert(path_handle, path_stack);
         Some(path_stack)
@@ -259,11 +282,13 @@ fn special_path(
     ctx: &BinaryContext<'_>,
     file_path: Option<SourceFilePathHandle>,
 ) -> Option<StringHandle> {
-    let file_path = file_path?;
-    let p = ctx.symbol_map.resolve_source_file_path(file_path);
-    let s = match p.special_path_str() {
-        Some(special_path) => b.profile.handle_for_string(&special_path),
-        None => b.profile.handle_for_string(p.raw_path()),
-    };
-    Some(s)
+    let p = ctx.symbol_map.resolve_source_file_path(file_path?);
+    Some(b.profile.handle_for_string(&source_path(&p)))
+}
+
+/// The path to put on a frame for a source file. The special path, where the
+/// file has one, is what the front-end's source view needs in order to fetch
+/// the file, so every frame that stands for a file uses it.
+fn source_path<'a>(p: &'a SourceFilePath<'a>) -> Cow<'a, str> {
+    p.special_path_str().unwrap_or(Cow::Borrowed(p.raw_path()))
 }

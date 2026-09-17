@@ -1,7 +1,8 @@
 use std::ops::Range;
 
 use fxprof_processed_profile::{
-    CategoryHandle, CpuDelta, FrameFlags, Profile, StackHandle, ThreadHandle, Timestamp,
+    CategoryHandle, CpuDelta, FrameFlags, Profile, SourceLocation, StackHandle, ThreadHandle,
+    Timestamp,
 };
 
 use crate::categories::{Categories, Kind};
@@ -86,6 +87,36 @@ impl ProfileBuilder {
         let frame = self
             .profile
             .handle_for_frame_with_label(s, category, FrameFlags::empty());
+        self.profile.handle_for_stack(frame, parent)
+    }
+
+    /// A stack ending in a label frame which also carries a source file path.
+    ///
+    /// The path is part of a frame's function identity, so two frames with the
+    /// same label but different paths stay distinct — which is what keeps, say,
+    /// the many `src` directories of a build from collapsing into one another in
+    /// the inverted view.
+    pub fn labelled_stack_with_file_path(
+        &mut self,
+        parent: Option<StackHandle>,
+        label: &str,
+        file_path: &str,
+        kind: Kind,
+    ) -> StackHandle {
+        let category = self.category(kind);
+        let s = self.profile.handle_for_string(label);
+        let file_path = self.profile.handle_for_string(file_path);
+        let frame = self
+            .profile
+            .handle_for_frame_with_label_and_source_location(
+                s,
+                SourceLocation {
+                    file_path: Some(file_path),
+                    ..Default::default()
+                },
+                category,
+                FrameFlags::empty(),
+            );
         self.profile.handle_for_stack(frame, parent)
     }
 }
