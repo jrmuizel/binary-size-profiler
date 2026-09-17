@@ -1,6 +1,7 @@
 mod binary;
 mod emit;
 mod macho;
+mod pe;
 mod symbols;
 mod text;
 

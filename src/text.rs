@@ -14,20 +14,24 @@ use crate::emit::{ProfileBuilder, Region};
 /// Walks a text section one byte at a time, looking up the symbol, inline stack
 /// and source location for each address, and emitting one sample per run of
 /// addresses that share the same information.
+///
+/// `code_size` is how many bytes at the start of `region` are code. Any bytes of
+/// the region beyond that are padding, and are left to `region` to attribute to
+/// itself, because they are not mapped and so have no address to look up.
 pub async fn process_text_section(
     b: &mut ProfileBuilder,
     region: &mut Region,
     svma: u64,
+    code_size: u64,
     ctx: &BinaryContext<'_>,
 ) {
     let file_range = region.range();
-    let section_size = file_range.end - file_range.start;
     let section_start_rel = svma - ctx.base_addr;
-    let section_end_rel = svma + section_size - ctx.base_addr;
+    let section_end_rel = svma + code_size - ctx.base_addr;
 
     let mut walk = TextWalk::new(b, region.stack());
 
-    let pb = ProgressBar::new(section_size);
+    let pb = ProgressBar::new(code_size);
     pb.set_style(
         ProgressStyle::default_bar()
             .template(

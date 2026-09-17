@@ -22,7 +22,7 @@ pub fn layout(
     binary_start: u64,
     sections: Vec<Section>,
 ) -> Vec<LayoutNode> {
-    let mut nodes: Vec<LayoutNode> = sections.into_iter().map(Section::into_node).collect();
+    let mut nodes: Vec<LayoutNode> = sections.into_iter().map(|s| s.into_node(0)).collect();
     nodes.extend(
         load_command_regions(data, binary_start)
             .into_iter()

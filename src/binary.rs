@@ -11,11 +11,15 @@ use wholesym::samply_symbols::relative_address_base;
 
 use crate::emit::{ProfileBuilder, Region};
 use crate::macho;
+use crate::pe;
 use crate::symbols::BinarySymbols;
 use crate::text;
 
 /// One section of a binary, with its file range already made absolute, i.e.
 /// adjusted for the offset of the containing fat archive member.
+///
+/// `file_range` covers the section's contents. A section can occupy more of the
+/// file than that — see [`Section::into_node`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Section {
     pub file_range: Range<u64>,
@@ -42,8 +46,10 @@ pub enum Contents {
     /// unrecognised data stay visible instead of disappearing.
     Children(Vec<LayoutNode>),
     /// Machine code, broken down per address by symbol, inline frames and source
-    /// location. `svma` is the address this range is mapped at.
-    Text { svma: u64 },
+    /// location. `svma` is the address the node's first byte is mapped at, and
+    /// `code_size` is how many bytes from there are code. Any bytes of the node
+    /// after that are padding, which has no address to look anything up at.
+    Text { svma: u64, code_size: u64 },
 }
 
 impl LayoutNode {
@@ -66,12 +72,19 @@ impl LayoutNode {
 }
 
 impl Section {
-    pub fn into_node(self) -> LayoutNode {
+    /// `trailing_padding` is the number of bytes after the section's contents
+    /// that belong to it but aren't part of it, such as the bytes a PE section
+    /// takes up to satisfy `FileAlignment`. They become part of the node's range,
+    /// so they end up attributed to the section that causes them rather than to
+    /// the enclosing region.
+    pub fn into_node(self, trailing_padding: u64) -> LayoutNode {
+        let code_size = self.file_range.end - self.file_range.start;
+        let range = self.file_range.start..self.file_range.end + trailing_padding;
         if self.kind == SectionKind::Text {
             return LayoutNode {
-                range: self.file_range,
+                range,
                 label: self.name,
-                contents: Contents::Text { svma: self.svma },
+                contents: Contents::Text { svma: self.svma, code_size },
             };
         }
         // The section kind goes into the section's own label rather than into a
@@ -80,7 +93,7 @@ impl Section {
         // share it: the profiler's function list and bottom-up view would merge
         // `.rdata`, `.rsrc` and `.pdata` into one "ReadOnlyData" entry whose byte
         // count describes nothing in particular.
-        LayoutNode::opaque(self.file_range, format!("{} ({:?})", self.name, self.kind))
+        LayoutNode::opaque(range, format!("{} ({:?})", self.name, self.kind))
     }
 }
 
@@ -140,7 +153,8 @@ pub async fn process_binary(
         Ok(FileKind::MachO32) | Ok(FileKind::MachO64) => {
             macho::layout(object_file, data, binary_start, sections)
         }
-        _ => sections.into_iter().map(Section::into_node).collect(),
+        Ok(FileKind::Pe32) | Ok(FileKind::Pe64) => pe::layout(data, binary_start, sections),
+        _ => sections.into_iter().map(|s| s.into_node(0)).collect(),
     };
 
     emit_nodes(b, region, nodes, &ctx).await;
@@ -182,8 +196,8 @@ fn emit_nodes<'a>(
         for node in nodes {
             let mut child = region.child(b, node.range.clone(), &node.label);
             match node.contents {
-                Contents::Text { svma } => {
-                    text::process_text_section(b, &mut child, svma, ctx).await
+                Contents::Text { svma, code_size } => {
+                    text::process_text_section(b, &mut child, svma, code_size, ctx).await
                 }
                 Contents::Children(children) => emit_nodes(b, &mut child, children, ctx).await,
             }
