@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use fxprof_processed_profile::{LibraryHandle, LibraryInfo};
 use object::read::Object;
-use object::{CompressionFormat, File, SectionKind};
+use object::{File, SectionKind};
 use wholesym::AccessPatternHint;
 use wholesym::samply_symbols::object;
 use wholesym::samply_symbols::relative_address_base;
@@ -19,7 +19,6 @@ pub struct Section {
     pub svma: u64,
     pub kind: SectionKind,
     pub name: String,
-    pub is_compressed: bool,
 }
 
 /// Everything needed to symbolicate addresses in one binary.
@@ -81,7 +80,6 @@ fn sections(object_file: &File<'_>, binary_start: u64) -> Vec<Section> {
         .filter_map(|s| {
             use object::ObjectSection;
             let file_range = s.compressed_file_range().unwrap();
-            let is_compressed = file_range.format != CompressionFormat::None;
             if file_range.uncompressed_size == 0 {
                 return None;
             }
@@ -92,7 +90,6 @@ fn sections(object_file: &File<'_>, binary_start: u64) -> Vec<Section> {
                 svma: s.address(),
                 kind: s.kind(),
                 name: s.name().unwrap().to_string(),
-                is_compressed,
             })
         })
         .collect();
