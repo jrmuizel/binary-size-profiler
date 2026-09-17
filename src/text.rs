@@ -87,6 +87,11 @@ pub async fn process_text_section(
     pb.finish_with_message("Section processed");
 }
 
+/// Where Firefox's Windows builders check out the source. Stripping it keeps six
+/// frames that say nothing out of every Windows profile. There is no general way
+/// to know a build machine's checkout root, so this is just the one we know.
+const BUILDER_CHECKOUT_ROOT: &str = "C:\\b\\s\\w\\ir\\cache\\builder\\";
+
 /// State carried across the addresses of a single text section.
 struct TextWalk {
     section_stack: StackHandle,
@@ -216,16 +221,22 @@ impl TextWalk {
         if let Some(ps) = self.stack_prefix_for_path.get(&path_handle) {
             return Some(*ps);
         }
-        let path = ctx.symbol_map.resolve_source_file_path(path_handle);
-        let path = path.display_path();
-        let path = path.trim_start_matches("C:\\b\\s\\w\\ir\\cache\\builder\\");
-        let mut accum_path = String::new();
+        let source_file_path = ctx.symbol_map.resolve_source_file_path(path_handle);
+        let display_path = source_file_path.display_path();
+        let path = display_path
+            .strip_prefix(BUILDER_CHECKOUT_ROOT)
+            .unwrap_or(&display_path);
 
+        let mut accum_path = String::new();
         let mut path_stack = self.section_stack;
 
-        for p in path.split(['/', '\\']) {
+        // An absolute path splits into an empty first component. Skipping empty
+        // components keeps it from becoming a frame labelled "/", and keeps the
+        // separator it stands for out of every label below it, which otherwise
+        // read "/", "//builds", "//builds/worker".
+        for component in path.split(['/', '\\']).filter(|c| !c.is_empty()) {
             accum_path.push('/');
-            accum_path.push_str(p);
+            accum_path.push_str(component);
             path_stack = b.labelled_stack(Some(path_stack), &accum_path);
         }
         self.stack_prefix_for_path.insert(path_handle, path_stack);
