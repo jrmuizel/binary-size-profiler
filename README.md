@@ -53,6 +53,18 @@ byte in the file is accounted for somewhere.
 Inside `__LINKEDIT`, which has no sections, we use the load commands to find the
 symbol table, string table, code signature, function starts, and the rest.
 
+For a PE binary the nesting is headers or section → source file path → function
+→ inlined calls. A section covers its full on-disk range, including the bytes it
+takes up only to satisfy `FileAlignment`, so that padding is attributed to the
+section that causes it. The resource section is broken down by resource type,
+name, and what the bytes turn out to be: an image's dimensions, and a hash of the
+contents. Resources with identical bytes get identical labels, so they collapse
+into one node in the inverted call tree with one caller per copy, and anything
+with more than one caller is stored more than once in the file. That's worth
+having. In a shippable `firefox.exe` the resources are over half the file and
+almost all of that is icons, four pairs of which are exact copies of each other
+and cost 66,660 bytes.
+
 The breakdown of text sections uses a brute force approach.
 
 We walk the bytes in the binary one by one, from front to back. For every byte in a text section, we feed the address into addr2line and look at the file + line + inline stack for that address. If the information is different than for the previous address, we emit a sample, with the sample's "weight" being the byte count for the emitted sample.
@@ -62,7 +74,7 @@ We walk the bytes in the binary one by one, from front to back. For every byte i
 - Hardcoded to the Mozilla symbol server: When looking up debug information, this tool makes a request to symbols.mozilla.org with the binary name and its debug ID. This makes for a nice experience when you run this tool on official Firefox binaries, but it's not very useful for other consumers of this tool.
 - Output size: For large binaries, the output JSON can be prohibitively large. For example, this tool cannot handle `xul.dll` from Firefox, which is 162MB big. It creates over 3GB of JSON, which is too much for the front-end.
 - Confusing byte counts in the assembly view: To save space in the profile JSON, we don't write down the byte count for every instruction. We only emit a new sample for an instruction address if the function + source information about that address is different from the information for the previous byte. This often makes it look as if one instruction took 20 bytes and the next four instructions took zero bytes each. You need to imagine the 20 bytes being "spread out" over the whole hunk of instructions until the next sample count.
-- Coarse attribution for some bytes: Mach-O binaries are broken down by segment, section, and the individual regions that load commands point at, such as the symbol table, the string table and the code signature. But those regions are not broken down any further yet — the symbol table shows up as a single lump rather than being attributed to individual symbols. For ELF and PE binaries we only break down by section, so anything outside a section is unattributed.
+- Coarse attribution for some bytes: the regions we identify outside of text sections are not broken down any further yet. A Mach-O symbol table shows up as a single lump rather than being attributed to individual symbols, and neither PE nor Mach-O attributes read-only data to the function or variable it belongs to. For PE in particular, `.pdata` and the unwind info it points at are per-function by construction and could be charged to those functions, but aren't yet. For ELF we only break down by section, so anything outside a section is unattributed.
 
 ## License
 

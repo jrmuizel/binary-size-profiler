@@ -45,6 +45,13 @@ pub enum Contents {
     /// that no child covers are attributed to the node itself, so padding and
     /// unrecognised data stay visible instead of disappearing.
     Children(Vec<LayoutNode>),
+    /// Labelled byte ranges in ascending file order, each with the chain of
+    /// labels it hangs under. Unlike [`Contents::Children`], the labels do not
+    /// have to describe contiguous ranges: PE resources are keyed by a tree of
+    /// type, name and language, but the bytes those keys point at are scattered
+    /// through the section in an unrelated order, so there is no range that
+    /// "all the icons" covers.
+    Scattered(Vec<(Range<u64>, Vec<String>)>),
     /// Machine code, broken down per address by symbol, inline frames and source
     /// location. `svma` is the address the node's first byte is mapped at, and
     /// `code_size` is how many bytes from there are code. Any bytes of the node
@@ -84,7 +91,10 @@ impl Section {
             return LayoutNode {
                 range,
                 label: self.name,
-                contents: Contents::Text { svma: self.svma, code_size },
+                contents: Contents::Text {
+                    svma: self.svma,
+                    code_size,
+                },
             };
         }
         // The section kind goes into the section's own label rather than into a
@@ -200,6 +210,15 @@ fn emit_nodes<'a>(
                     text::process_text_section(b, &mut child, svma, code_size, ctx).await
                 }
                 Contents::Children(children) => emit_nodes(b, &mut child, children, ctx).await,
+                Contents::Scattered(entries) => {
+                    for (range, labels) in entries {
+                        let mut stack = child.stack();
+                        for label in &labels {
+                            stack = b.labelled_stack(Some(stack), label);
+                        }
+                        child.leaf(b, range, stack);
+                    }
+                }
             }
             child.finish(b);
         }
