@@ -9,6 +9,7 @@ use wholesym::AccessPatternHint;
 use wholesym::samply_symbols::object;
 use wholesym::samply_symbols::relative_address_base;
 
+use crate::categories::Kind;
 use crate::emit::{ProfileBuilder, Region};
 use crate::macho;
 use crate::pe;
@@ -37,6 +38,9 @@ pub struct Section {
 pub struct LayoutNode {
     pub range: Range<u64>,
     pub label: String,
+    /// What the node holds, which decides the colour its bytes get in the
+    /// front-end's activity graph.
+    pub kind: Kind,
     pub contents: Contents,
 }
 
@@ -61,18 +65,25 @@ pub enum Contents {
 
 impl LayoutNode {
     /// A range we can label but not break down any further.
-    pub fn opaque(range: Range<u64>, label: impl Into<String>) -> Self {
+    pub fn opaque(range: Range<u64>, label: impl Into<String>, kind: Kind) -> Self {
         LayoutNode {
             range,
             label: label.into(),
+            kind,
             contents: Contents::Children(Vec::new()),
         }
     }
 
-    pub fn parent(range: Range<u64>, label: impl Into<String>, children: Vec<LayoutNode>) -> Self {
+    pub fn parent(
+        range: Range<u64>,
+        label: impl Into<String>,
+        kind: Kind,
+        children: Vec<LayoutNode>,
+    ) -> Self {
         LayoutNode {
             range,
             label: label.into(),
+            kind,
             contents: Contents::Children(children),
         }
     }
@@ -87,10 +98,12 @@ impl Section {
     pub fn into_node(self, trailing_padding: u64) -> LayoutNode {
         let code_size = self.file_range.end - self.file_range.start;
         let range = self.file_range.start..self.file_range.end + trailing_padding;
+        let kind = Kind::of_section(self.kind);
         if self.kind == SectionKind::Text {
             return LayoutNode {
                 range,
                 label: self.name,
+                kind,
                 contents: Contents::Text {
                     svma: self.svma,
                     code_size,
@@ -103,7 +116,7 @@ impl Section {
         // share it: the profiler's function list and bottom-up view would merge
         // `.rdata`, `.rsrc` and `.pdata` into one "ReadOnlyData" entry whose byte
         // count describes nothing in particular.
-        LayoutNode::opaque(range, format!("{} ({:?})", self.name, self.kind))
+        LayoutNode::opaque(range, format!("{} ({:?})", self.name, self.kind), kind)
     }
 }
 
@@ -204,7 +217,7 @@ fn emit_nodes<'a>(
 ) -> Pin<Box<dyn Future<Output = ()> + 'a>> {
     Box::pin(async move {
         for node in nodes {
-            let mut child = region.child(b, node.range.clone(), &node.label);
+            let mut child = region.child(b, node.range.clone(), &node.label, node.kind);
             match node.contents {
                 Contents::Text { svma, code_size } => {
                     text::process_text_section(b, &mut child, svma, code_size, ctx).await
@@ -214,7 +227,7 @@ fn emit_nodes<'a>(
                     for (range, labels) in entries {
                         let mut stack = child.stack();
                         for label in &labels {
-                            stack = b.labelled_stack(Some(stack), label);
+                            stack = b.labelled_stack(Some(stack), label, node.kind);
                         }
                         child.leaf(b, range, stack);
                     }

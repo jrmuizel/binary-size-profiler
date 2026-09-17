@@ -7,6 +7,7 @@ use object::{Endianness, File, FileKind, macho};
 use wholesym::samply_symbols::object;
 
 use crate::binary::{LayoutNode, Section};
+use crate::categories::Kind;
 
 /// Break a Mach-O binary down into segments, with sections and the regions
 /// described by load commands nested inside the segment that contains them.
@@ -26,7 +27,7 @@ pub fn layout(
     nodes.extend(
         load_command_regions(data, binary_start)
             .into_iter()
-            .map(|(range, label)| LayoutNode::opaque(range, label)),
+            .map(|(range, label)| LayoutNode::opaque(range, label, Kind::Metadata)),
     );
 
     let mut segments: Vec<(Range<u64>, String, Vec<LayoutNode>)> = object_file
@@ -61,7 +62,8 @@ pub fn layout(
 
     for (range, name, mut children) in segments {
         children.sort_by_key(|n| n.range.start);
-        top.push(LayoutNode::parent(range, name, children));
+        // A segment's own bytes are the gaps between its sections.
+        top.push(LayoutNode::parent(range, name, Kind::Padding, children));
     }
     top.sort_by_key(|n| n.range.start);
     top

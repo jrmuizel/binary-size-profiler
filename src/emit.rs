@@ -4,6 +4,8 @@ use fxprof_processed_profile::{
     CategoryHandle, CpuDelta, FrameFlags, Profile, StackHandle, ThreadHandle, Timestamp,
 };
 
+use crate::categories::{Categories, Kind};
+
 /// The profile under construction, plus the context that every sample shares.
 ///
 /// The profile's time axis is the file offset: a sample at "time" `t` describes
@@ -13,20 +15,21 @@ pub struct ProfileBuilder {
     /// `Profile` API; wrapping it would be all forwarding and no value.
     pub profile: Profile,
     thread: ThreadHandle,
-    category: CategoryHandle,
+    categories: Categories,
 }
 
 impl ProfileBuilder {
-    pub fn new(profile: Profile, thread: ThreadHandle, category: CategoryHandle) -> Self {
+    pub fn new(mut profile: Profile, thread: ThreadHandle) -> Self {
+        let categories = Categories::new(&mut profile);
         Self {
             profile,
             thread,
-            category,
+            categories,
         }
     }
 
-    pub fn category(&self) -> CategoryHandle {
-        self.category
+    pub fn category(&self, kind: Kind) -> CategoryHandle {
+        self.categories.handle(kind)
     }
 
     /// Attribute the bytes in `range` to `stack`, as two samples: one opening the
@@ -72,11 +75,17 @@ impl ProfileBuilder {
     }
 
     /// A stack ending in a plain label frame, e.g. a section or segment name.
-    pub fn labelled_stack(&mut self, parent: Option<StackHandle>, label: &str) -> StackHandle {
+    pub fn labelled_stack(
+        &mut self,
+        parent: Option<StackHandle>,
+        label: &str,
+        kind: Kind,
+    ) -> StackHandle {
+        let category = self.category(kind);
         let s = self.profile.handle_for_string(label);
         let frame = self
             .profile
-            .handle_for_frame_with_label(s, self.category, FrameFlags::empty());
+            .handle_for_frame_with_label(s, category, FrameFlags::empty());
         self.profile.handle_for_stack(frame, parent)
     }
 }
@@ -125,10 +134,16 @@ impl Region {
 
     /// Claim `range` for a child region, which gets its own label frame on top of
     /// this region's stack.
-    pub fn child(&mut self, b: &mut ProfileBuilder, range: Range<u64>, label: &str) -> Region {
+    pub fn child(
+        &mut self,
+        b: &mut ProfileBuilder,
+        range: Range<u64>,
+        label: &str,
+        kind: Kind,
+    ) -> Region {
         self.claim(b, &range, label);
         self.last_child_label = Some(label.to_owned());
-        let stack = b.labelled_stack(Some(self.stack), label);
+        let stack = b.labelled_stack(Some(self.stack), label, kind);
         Region::new(range, stack, label)
     }
 

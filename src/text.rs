@@ -9,6 +9,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use wholesym::samply_symbols::SourceFilePathHandle;
 
 use crate::binary::BinaryContext;
+use crate::categories::Kind;
 use crate::emit::{ProfileBuilder, Region};
 
 /// Walks a text section one byte at a time, looking up the symbol, inline stack
@@ -102,7 +103,9 @@ struct TextWalk {
 
 impl TextWalk {
     fn new(b: &mut ProfileBuilder, section_stack: StackHandle) -> Self {
-        let category = b.category();
+        // Bytes we can't name are worth spotting, so they get a category of their
+        // own rather than being coloured like the code around them.
+        let category = b.category(Kind::Unattributed);
         let unknown_path_str = b.profile.handle_for_string("<unknown path>");
         let unknown_path_frame =
             b.profile
@@ -134,7 +137,7 @@ impl TextWalk {
         addr_info: Option<wholesym::AddressInfo>,
         range: Range<u64>,
     ) {
-        let category = b.category();
+        let category = b.category(Kind::Code);
         let path_stack = self
             .path_stack(b, ctx, &addr_info)
             .unwrap_or(self.unknown_path_stack);
@@ -237,7 +240,7 @@ impl TextWalk {
         for component in path.split(['/', '\\']).filter(|c| !c.is_empty()) {
             accum_path.push('/');
             accum_path.push_str(component);
-            path_stack = b.labelled_stack(Some(path_stack), &accum_path);
+            path_stack = b.labelled_stack(Some(path_stack), &accum_path, Kind::Code);
         }
         self.stack_prefix_for_path.insert(path_handle, path_stack);
         Some(path_stack)

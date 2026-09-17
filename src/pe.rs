@@ -11,6 +11,7 @@ use object::{FileKind, LittleEndian as LE};
 use wholesym::samply_symbols::object;
 
 use crate::binary::{Contents, LayoutNode, Section};
+use crate::categories::Kind;
 
 /// Break a PE binary down into its headers and its sections.
 ///
@@ -36,6 +37,7 @@ pub fn layout(data: &[u8], binary_start: u64, sections: Vec<Section>) -> Vec<Lay
         nodes.push(LayoutNode::opaque(
             binary_start..binary_start + pe.size_of_headers,
             "PE headers",
+            Kind::Metadata,
         ));
     }
 
@@ -74,6 +76,7 @@ pub fn layout(data: &[u8], binary_start: u64, sections: Vec<Section>) -> Vec<Lay
         let is_opaque = matches!(&node.contents, Contents::Children(c) if c.is_empty());
         if !entries.is_empty() && is_opaque {
             node.contents = Contents::Scattered(entries);
+            node.kind = Kind::Resources;
         }
         node
     }));

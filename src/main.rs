@@ -1,4 +1,5 @@
 mod binary;
+mod categories;
 mod emit;
 mod macho;
 mod pe;
@@ -8,8 +9,8 @@ mod text;
 use std::path::Path;
 
 use fxprof_processed_profile::{
-    CategoryHandle, Profile, ProfileFormat, ReferenceTimestamp, SamplingInterval, ThreadHandle,
-    TimelineUnit, Timestamp, WeightType,
+    Profile, ProfileFormat, ReferenceTimestamp, SamplingInterval, ThreadHandle, TimelineUnit,
+    Timestamp, WeightType,
 };
 use memmap2::Mmap;
 use mimalloc::MiMalloc;
@@ -17,6 +18,7 @@ use object::read::macho::{FatArch, MachOFatFile32};
 use object::{File, FileKind};
 use wholesym::samply_symbols::object;
 
+use crate::categories::Kind;
 use crate::emit::{ProfileBuilder, Region};
 use crate::symbols::Symbolicator;
 
@@ -34,9 +36,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data = unsafe { Mmap::map(&file).unwrap() };
 
     let (profile, thread) = new_profile(file_name);
-    let mut b = ProfileBuilder::new(profile, thread, CategoryHandle::OTHER);
+    let mut b = ProfileBuilder::new(profile, thread);
 
-    let root_stack = b.labelled_stack(None, "(root)");
+    let root_stack = b.labelled_stack(None, "(root)", Kind::Padding);
     let mut root = Region::new(0..data.len() as u64, root_stack, "the file");
 
     let symbolicator = Symbolicator::new();
@@ -92,7 +94,7 @@ async fn process_fat_file(
             ),
         };
 
-        let mut member_region = root.child(b, member_range, &member_name);
+        let mut member_region = root.child(b, member_range, &member_name, Kind::Padding);
         binary::process_binary(b, &mut member_region, member_data, &object_file, symbols).await;
         member_region.finish(b);
     }
