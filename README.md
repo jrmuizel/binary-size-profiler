@@ -43,7 +43,17 @@ The source view and assembly view only work locally, before the profile is uploa
 
 ## How does it work?
 
-The current implementation uses a brute force approach.
+The profile's "time" axis is the file offset, and a sample's weight is a byte
+count. The call tree is the nesting of the file's structure: for a Mach-O
+binary, that's fat archive member → segment → section → source file path →
+function → inlined calls. Bytes that nothing claims — padding, alignment,
+regions we don't recognise — are attributed to the enclosing node, so every
+byte in the file is accounted for somewhere.
+
+Inside `__LINKEDIT`, which has no sections, we use the load commands to find the
+symbol table, string table, code signature, function starts, and the rest.
+
+The breakdown of text sections uses a brute force approach.
 
 We walk the bytes in the binary one by one, from front to back. For every byte in a text section, we feed the address into addr2line and look at the file + line + inline stack for that address. If the information is different than for the previous address, we emit a sample, with the sample's "weight" being the byte count for the emitted sample.
 
@@ -52,7 +62,7 @@ We walk the bytes in the binary one by one, from front to back. For every byte i
 - Hardcoded to the Mozilla symbol server: When looking up debug information, this tool makes a request to symbols.mozilla.org with the binary name and its debug ID. This makes for a nice experience when you run this tool on official Firefox binaries, but it's not very useful for other consumers of this tool.
 - Output size: For large binaries, the output JSON can be prohibitively large. For example, this tool cannot handle `xul.dll` from Firefox, which is 162MB big. It creates over 3GB of JSON, which is too much for the front-end.
 - Confusing byte counts in the assembly view: To save space in the profile JSON, we don't write down the byte count for every instruction. We only emit a new sample for an instruction address if the function + source information about that address is different from the information for the previous byte. This often makes it look as if one instruction took 20 bytes and the next four instructions took zero bytes each. You need to imagine the 20 bytes being "spread out" over the whole hunk of instructions until the next sample count.
-- Incomplete attribution for some bytes: For example, on macOS, we don't break down usage by mach-O segment, only by mach-O section. This means that symbol tables are currently attributed to the "root" node of the binary rather than to the `__LINKEDIT` segment. There are lots of improvements we could make to add more fine-grained information.
+- Coarse attribution for some bytes: Mach-O binaries are broken down by segment, section, and the individual regions that load commands point at, such as the symbol table, the string table and the code signature. But those regions are not broken down any further yet — the symbol table shows up as a single lump rather than being attributed to individual symbols. For ELF and PE binaries we only break down by section, so anything outside a section is unattributed.
 
 ## License
 

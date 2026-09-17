@@ -1,13 +1,16 @@
+use std::future::Future;
 use std::ops::Range;
+use std::pin::Pin;
 
 use fxprof_processed_profile::{LibraryHandle, LibraryInfo};
 use object::read::Object;
-use object::{File, SectionKind};
+use object::{File, FileKind, SectionKind};
 use wholesym::AccessPatternHint;
 use wholesym::samply_symbols::object;
 use wholesym::samply_symbols::relative_address_base;
 
 use crate::emit::{ProfileBuilder, Region};
+use crate::macho;
 use crate::symbols::BinarySymbols;
 use crate::text;
 
@@ -21,6 +24,63 @@ pub struct Section {
     pub name: String,
 }
 
+/// A labelled file range in the binary's layout. Each node becomes one frame in
+/// the profile's call tree.
+///
+/// Building the layout first, and emitting it second, keeps the format-specific
+/// knowledge (what a Mach-O segment is, where the symbol table lives) separate
+/// from the mechanics of turning ranges into samples.
+pub struct LayoutNode {
+    pub range: Range<u64>,
+    pub label: String,
+    pub contents: Contents,
+}
+
+pub enum Contents {
+    /// Subdivided into non-overlapping children in ascending file order. Bytes
+    /// that no child covers are attributed to the node itself, so padding and
+    /// unrecognised data stay visible instead of disappearing.
+    Children(Vec<LayoutNode>),
+    /// Machine code, broken down per address by symbol, inline frames and source
+    /// location. `svma` is the address this range is mapped at.
+    Text { svma: u64 },
+}
+
+impl LayoutNode {
+    /// A range we can label but not break down any further.
+    pub fn opaque(range: Range<u64>, label: impl Into<String>) -> Self {
+        LayoutNode {
+            range,
+            label: label.into(),
+            contents: Contents::Children(Vec::new()),
+        }
+    }
+
+    pub fn parent(range: Range<u64>, label: impl Into<String>, children: Vec<LayoutNode>) -> Self {
+        LayoutNode {
+            range,
+            label: label.into(),
+            contents: Contents::Children(children),
+        }
+    }
+}
+
+impl Section {
+    pub fn into_node(self) -> LayoutNode {
+        if self.kind == SectionKind::Text {
+            return LayoutNode {
+                range: self.file_range,
+                label: self.name,
+                contents: Contents::Text { svma: self.svma },
+            };
+        }
+        // We have nothing to say about the contents, so the only detail we can add
+        // below the section name is what kind of section it is.
+        let kind = LayoutNode::opaque(self.file_range.clone(), format!("{:?}", self.kind));
+        LayoutNode::parent(self.file_range, self.name, vec![kind])
+    }
+}
+
 /// Everything needed to symbolicate addresses in one binary.
 pub struct BinaryContext<'a> {
     pub symbol_map: &'a wholesym::SymbolMap,
@@ -28,10 +88,11 @@ pub struct BinaryContext<'a> {
     pub base_addr: u64,
 }
 
-/// Break `region`, which covers one binary, down into its sections.
+/// Break `region`, which covers one binary, down into its parts.
 pub async fn process_binary(
     b: &mut ProfileBuilder,
     region: &mut Region,
+    data: &[u8],
     object_file: &File<'_>,
     symbols: BinarySymbols,
 ) {
@@ -67,13 +128,22 @@ pub async fn process_binary(
         base_addr,
     };
 
-    for section in sections(object_file, region.range().start) {
-        process_section(b, region, &section, &ctx).await;
-    }
+    // Section file offsets are relative to the start of this binary, which is not
+    // the start of the file when the binary is a fat archive member.
+    let binary_start = region.range().start;
+    let sections = sections(object_file, binary_start);
+
+    let nodes = match FileKind::parse(data) {
+        Ok(FileKind::MachO32) | Ok(FileKind::MachO64) => {
+            macho::layout(object_file, data, binary_start, sections)
+        }
+        _ => sections.into_iter().map(Section::into_node).collect(),
+    };
+
+    emit_nodes(b, region, nodes, &ctx).await;
 }
 
-/// The binary's sections in ascending file order. `binary_start` is where the
-/// binary begins in the file, which is not zero for a fat archive member.
+/// The binary's sections in ascending file order.
 fn sections(object_file: &File<'_>, binary_start: u64) -> Vec<Section> {
     let mut sections: Vec<_> = object_file
         .sections()
@@ -98,26 +168,23 @@ fn sections(object_file: &File<'_>, binary_start: u64) -> Vec<Section> {
     sections
 }
 
-async fn process_section(
-    b: &mut ProfileBuilder,
-    binary_region: &mut Region,
-    section: &Section,
-    ctx: &BinaryContext<'_>,
-) {
-    let mut region = binary_region.child(b, section.file_range.clone(), &section.name);
-
-    if section.kind == SectionKind::Text {
-        text::process_text_section(b, &mut region, section, ctx).await;
-    } else {
-        // We have nothing to say about the contents, so attribute the whole
-        // section to a frame naming its kind.
-        let kind = region.child(
-            b,
-            section.file_range.clone(),
-            &format!("{:?}", section.kind),
-        );
-        kind.finish(b);
-    }
-
-    region.finish(b);
+/// Emit `nodes` as children of `region`. Boxed because it recurses.
+fn emit_nodes<'a>(
+    b: &'a mut ProfileBuilder,
+    region: &'a mut Region,
+    nodes: Vec<LayoutNode>,
+    ctx: &'a BinaryContext<'a>,
+) -> Pin<Box<dyn Future<Output = ()> + 'a>> {
+    Box::pin(async move {
+        for node in nodes {
+            let mut child = region.child(b, node.range.clone(), &node.label);
+            match node.contents {
+                Contents::Text { svma } => {
+                    text::process_text_section(b, &mut child, svma, ctx).await
+                }
+                Contents::Children(children) => emit_nodes(b, &mut child, children, ctx).await,
+            }
+            child.finish(b);
+        }
+    })
 }

@@ -1,5 +1,6 @@
 mod binary;
 mod emit;
+mod macho;
 mod symbols;
 mod text;
 
@@ -46,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => {
             let object_file = File::parse(&data[..]).unwrap();
             let symbols = symbolicator.load(Path::new(path), &object_file).await;
-            binary::process_binary(&mut b, &mut root, &object_file, symbols).await;
+            binary::process_binary(&mut b, &mut root, &data, &object_file, symbols).await;
         }
     }
 
@@ -92,7 +93,7 @@ async fn process_fat_file(
         };
 
         let mut member_region = root.child(b, member_range, &member_name);
-        binary::process_binary(b, &mut member_region, &object_file, symbols).await;
+        binary::process_binary(b, &mut member_region, member_data, &object_file, symbols).await;
         member_region.finish(b);
     }
 }

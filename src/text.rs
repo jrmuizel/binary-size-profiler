@@ -8,7 +8,7 @@ use fxprof_processed_profile::{
 use indicatif::{ProgressBar, ProgressStyle};
 use wholesym::samply_symbols::SourceFilePathHandle;
 
-use crate::binary::{BinaryContext, Section};
+use crate::binary::BinaryContext;
 use crate::emit::{ProfileBuilder, Region};
 
 /// Walks a text section one byte at a time, looking up the symbol, inline stack
@@ -17,12 +17,13 @@ use crate::emit::{ProfileBuilder, Region};
 pub async fn process_text_section(
     b: &mut ProfileBuilder,
     region: &mut Region,
-    section: &Section,
+    svma: u64,
     ctx: &BinaryContext<'_>,
 ) {
-    let section_size = section.file_range.end - section.file_range.start;
-    let section_start_rel = section.svma - ctx.base_addr;
-    let section_end_rel = section.svma + section_size - ctx.base_addr;
+    let file_range = region.range();
+    let section_size = file_range.end - file_range.start;
+    let section_start_rel = svma - ctx.base_addr;
+    let section_end_rel = svma + section_size - ctx.base_addr;
 
     let mut walk = TextWalk::new(b, region.stack());
 
@@ -39,7 +40,7 @@ pub async fn process_text_section(
     let mut pending_sample_relative_address = 0;
     let mut pending_sample_addr_info = None;
     let mut pending_sample_bytes = 0;
-    let mut pending_sample_file_offset = section.file_range.start;
+    let mut pending_sample_file_offset = file_range.start;
 
     for addr in section_start_rel..section_end_rel {
         if addr & 0xffff == 0 {
