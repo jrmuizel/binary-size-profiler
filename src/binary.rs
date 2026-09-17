@@ -74,10 +74,13 @@ impl Section {
                 contents: Contents::Text { svma: self.svma },
             };
         }
-        // We have nothing to say about the contents, so the only detail we can add
-        // below the section name is what kind of section it is.
-        let kind = LayoutNode::opaque(self.file_range.clone(), format!("{:?}", self.kind));
-        LayoutNode::parent(self.file_range, self.name, vec![kind])
+        // The section kind goes into the section's own label rather than into a
+        // child node. A child would carry the same byte count as its parent, and
+        // because its label is just the kind, every section of the same kind would
+        // share it: the profiler's function list and bottom-up view would merge
+        // `.rdata`, `.rsrc` and `.pdata` into one "ReadOnlyData" entry whose byte
+        // count describes nothing in particular.
+        LayoutNode::opaque(self.file_range, format!("{} ({:?})", self.name, self.kind))
     }
 }
 
